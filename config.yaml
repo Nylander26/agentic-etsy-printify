@@ -1,0 +1,31 @@
+research:
+  keywords_seed:
+    - "funny cat"
+    - "dog mom"
+    - "nurse life"
+    - "hiking lover"
+  max_niches: 5
+  min_demand_score: 6
+  listings_per_keyword: 50
+
+generation:
+  designs_per_niche: 5
+  products:
+    - tshirt
+    - mug
+    - poster
+  variations_per_design: 3   # base, dark, no-text — hardcoded in generator
+  style_preference: "minimalist, clean vector"
+
+publishing:
+  margin_percent: 50
+  max_publish_per_run: 25
+
+gemini:
+  model_text: "gemini-1.5-pro"
+  model_image: "gemini-2.0-flash-exp-image-generation"
+  max_image_requests_per_minute: 8
+
+pipeline:
+  notify_telegram: true
+  auto_publish: false   # always require manual review before publishing

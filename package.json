@@ -1,0 +1,35 @@
+{
+  "name": "agent-publish-etsy-printify",
+  "version": "1.0.0",
+  "description": "Automated pipeline: Etsy niche research → AI design generation → Printify publish",
+  "type": "module",
+  "scripts": {
+    "research": "tsx src/research/index.ts",
+    "generate": "tsx src/generator/index.ts",
+    "review": "tsx src/reviewer/index.ts",
+    "publish": "tsx src/publisher/index.ts",
+    "pipeline": "tsx src/pipeline.ts",
+    "stats": "tsx src/monitor/index.ts",
+    "test:apis": "tsx src/test-apis.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "@imgly/background-removal-node": "^1.4.5",
+    "axios": "^1.9.0",
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.5.0",
+    "sharp": "^0.34.5",
+    "yaml": "^2.8.3",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.3",
+    "@types/yaml": "^1.9.7",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  },
+  "packageManager": "pnpm@10.29.3"
+}
