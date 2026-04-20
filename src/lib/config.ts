@@ -20,7 +20,7 @@ const schema = z.object({
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
   }),
   gemini: z.object({
-    model_text: z.string().default("gemini-1.5-pro"),
+    model_text: z.string().default("gemini-2.0-flash"),
     model_image: z.string().default("gemini-2.0-flash-exp-image-generation"),
     max_image_requests_per_minute: z.number().int().min(1).max(10).default(8),
   }),

@@ -5,7 +5,7 @@ const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
 // ── Text client (Gemini Pro) ──────────────────────────────────────────────────
 
-const textModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const textModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 export async function generateText(prompt: string): Promise<string> {
   const result: GenerateContentResult = await textModel.generateContent(prompt);
