@@ -22,7 +22,7 @@ export async function generateJSON<T>(prompt: string): Promise<T> {
 
 // ── Image client (gemini-2.5-flash — "Nano Banana") ──────────────────────────
 
-const imageModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp-image-generation" });
+const imageModel = genAI.getGenerativeModel({ model: "gemini-3.1-flash-image-preview" });
 
 // Token bucket: 8 req/min (free tier cap is 10, we stay under)
 const IMAGE_RATE_LIMIT = 8;
