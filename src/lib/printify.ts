@@ -120,17 +120,6 @@ export async function createProduct(input: CreateProductInput): Promise<Printify
   return res.data;
 }
 
-export async function publishProduct(
-  shopId: string,
-  productId: string
-): Promise<void> {
-  await http.post(`/shops/${shopId}/products/${productId}/publish.json`, {
-    title: true,
-    description: true,
-    images: true,
-    variants: true,
-    tags: true,
-    keyFeatures: true,
-    shipping_template: true,
-  });
-}
+// Note: Printify's POST /products/{id}/publish.json triggers sales-channel publishing.
+// We intentionally don't expose it — productos quedan en DRAFT y se publican manualmente
+// desde el dashboard de Printify (botón "Publish to Etsy") o vía el etsy-pack generado.

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import type { ProductType, DesignMetadata } from "./types.js";
 import { PRINTIFY_DIMENSIONS } from "./types.js";
+import { getConfig } from "../lib/config.js";
 
 // Remove background using @imgly/background-removal-node
 // Lazy import — only loaded when needed (large ONNX model)
@@ -63,7 +64,9 @@ export async function postProcess(
     resizedOriginalPath: metadata.files.original,
   };
 
-  if (metadata.product === "tshirt") {
+  const removeBgEnabled = getConfig().generation.remove_background;
+
+  if (metadata.product === "tshirt" && removeBgEnabled) {
     // Remove background first, then resize
     process.stdout.write("      removing background... ");
     const noBgBuffer = await removeBackground(originalBuffer);

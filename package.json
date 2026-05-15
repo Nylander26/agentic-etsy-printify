@@ -7,7 +7,7 @@
     "research": "tsx src/research/index.ts",
     "generate": "tsx src/generator/index.ts",
     "review": "tsx src/reviewer/index.ts",
-    "publish": "tsx src/publisher/index.ts",
+    "publish-drafts": "tsx src/publisher/index.ts",
     "pipeline": "tsx src/pipeline.ts",
     "stats": "tsx src/monitor/index.ts",
     "test:apis": "tsx src/test-apis.ts",
@@ -20,6 +20,7 @@
     "axios": "^1.9.0",
     "better-sqlite3": "^11.9.1",
     "dotenv": "^16.5.0",
+    "google-trends-api": "^4.9.2",
     "sharp": "^0.34.5",
     "yaml": "^2.8.3",
     "zod": "^3.24.3"
@@ -31,5 +32,13 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
   },
-  "packageManager": "pnpm@10.29.3"
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "onnxruntime-node",
+      "sharp"
+    ]
+  }
 }

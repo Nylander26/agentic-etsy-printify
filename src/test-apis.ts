@@ -1,11 +1,13 @@
 /**
- * Semana 1 entregable: verifica conexión real a las 3 APIs.
+ * Verifica conexión a APIs externas.
  * Ejecutar: pnpm test:apis
- * Requiere .env con todas las keys configuradas y Etsy autorizado.
+ * Requiere .env con: GEMINI_API_KEY, PRINTIFY_API_TOKEN (TELEGRAM_* opcional).
+ *
+ * Nota: no usamos la API de Etsy — el flujo a Etsy es manual desde Printify.
  */
 import { generateText, generateImage } from "./lib/gemini.js";
-import { getMe, getActiveListings } from "./lib/etsy.js";
 import { getShops, getBlueprints } from "./lib/printify.js";
+import { searchNiche } from "./research/trends-source.js";
 import { writeFileSync } from "fs";
 
 function ok(msg: string) { console.log(`  ✅ ${msg}`); }
@@ -37,21 +39,18 @@ async function testGeminiImage() {
   }
 }
 
-async function testEtsy() {
-  console.log("\n🛍️  Etsy API...");
+async function testGoogleTrends() {
+  console.log("\n📈 Google Trends...");
   try {
-    const me = await getMe();
-    ok(`Authenticated. shop_id=${me.shop_id}, user_id=${me.user_id}`);
-
-    if (me.shop_id) {
-      const listings = await getActiveListings(me.shop_id);
-      ok(`Active listings: ${listings.length}`);
-      if (listings[0]) {
-        console.log(`  First listing: "${listings[0].title}" (${listings[0].state})`);
-      }
+    const data = await searchNiche("cat lover gifts");
+    ok(
+      `"${data.keyword}": avg=${data.avgInterest.toFixed(1)}, peak=${data.peakInterest}, trend=${data.trend}`
+    );
+    if (data.topQueries.length) {
+      console.log(`  Top related: ${data.topQueries.slice(0, 5).join(", ")}`);
     }
   } catch (err) {
-    fail("Etsy API", err);
+    fail("Google Trends", err);
   }
 }
 
@@ -64,7 +63,6 @@ async function testPrintify() {
     const blueprints = await getBlueprints();
     ok(`Blueprints available: ${blueprints.length}`);
 
-    // Show a few relevant ones
     const keywords = ["t-shirt", "tshirt", "mug", "poster"];
     const relevant = blueprints.filter((b) =>
       keywords.some((kw) => b.title.toLowerCase().includes(kw))
@@ -81,12 +79,12 @@ async function testPrintify() {
 }
 
 async function main() {
-  console.log("🚀 Semana 1 — Test de conexión a las 3 APIs\n");
+  console.log("🚀 Test de conexión a APIs\n");
   console.log("=".repeat(50));
 
   await testGeminiText();
   await testGeminiImage();
-  await testEtsy();
+  await testGoogleTrends();
   await testPrintify();
 
   console.log("\n" + "=".repeat(50));

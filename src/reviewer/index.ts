@@ -4,7 +4,7 @@
  * Muestra cada diseño pending-review y espera input: [A]probar / [R]echazar / Re[G]enerar / [S]altar
  */
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, cpSync, rmSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import * as readline from "readline";
 import type { DesignMetadata } from "../generator/types.js";
 
@@ -75,8 +75,8 @@ function moveDesign(meta: DesignMetadata, dest: "approved" | "rejected"): Design
   rmSync(srcDir, { recursive: true, force: true });
 
   const updatedFiles: DesignMetadata["files"] = {
-    original: join(destDir, "original.png"),
-    ...(meta.files.noBg ? { noBg: join(destDir, "nobg.png") } : {}),
+    original: join(destDir, basename(meta.files.original)),
+    ...(meta.files.noBg ? { noBg: join(destDir, basename(meta.files.noBg)) } : {}),
   };
 
   const updatedMeta: DesignMetadata = {
@@ -178,7 +178,7 @@ async function main() {
   }
 
   if (stats.approved > 0) {
-    console.log(`\n  Siguiente paso: pnpm publish`);
+    console.log(`\n  Siguiente paso: pnpm publish-drafts`);
   }
   console.log();
 }

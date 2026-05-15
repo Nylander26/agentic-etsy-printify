@@ -112,12 +112,11 @@ async function processNiche(
     for (const meta of generated) {
       try {
         const pp = await postProcess(meta);
-        if (pp.noBgPath) {
-          meta.files.noBg = pp.noBgPath;
-          // Update metadata.json with noBg path
-          const dir = join(outputDir, meta.id);
-          writeFileSync(join(dir, "metadata.json"), JSON.stringify(meta, null, 2));
-        }
+        // Point original at the Printify-ready resized image (PNG)
+        meta.files.original = pp.resizedOriginalPath;
+        if (pp.noBgPath) meta.files.noBg = pp.noBgPath;
+        const dir = join(outputDir, meta.id);
+        writeFileSync(join(dir, "metadata.json"), JSON.stringify(meta, null, 2));
         allMetadata.push(meta);
       } catch (err) {
         console.error(`      Post-process error: ${err instanceof Error ? err.message : err}`);
@@ -162,15 +161,23 @@ async function main() {
   }
 
   // Summary
-  const approved = allGenerated.filter((m) => m.status === "pending-review").length;
+  const pending = allGenerated.filter((m) => m.status === "pending-review").length;
   console.log("\n" + "─".repeat(60));
+
+  if (pending === 0) {
+    console.log("\n❌ No se generó ningún diseño. Revisa los errores arriba.\n");
+    process.exit(1);
+  }
+
   console.log(`\n✅ Generación completada:`);
   console.log(`   Total diseños: ${allGenerated.length}`);
-  console.log(`   Pendientes de revisión: ${approved}`);
+  console.log(`   Pendientes de revisión: ${pending}`);
   console.log(`\n   Siguiente paso: pnpm review\n`);
 }
 
-main().catch((err) => {
-  console.error("Generator failed:", err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error("Generator failed:", err);
+    process.exit(1);
+  });

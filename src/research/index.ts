@@ -4,7 +4,7 @@
  * Output: research-results/YYYY-MM-DD.json con top 10 nichos rankeados.
  */
 import { writeFileSync, mkdirSync } from "fs";
-import { searchNiche } from "./etsy-scraper.js";
+import { searchNiche } from "./trends-source.js";
 import { analyzeNiche, rankNiches } from "./niche-analyzer.js";
 import type { ResearchResult } from "./types.js";
 
@@ -39,21 +39,23 @@ async function main() {
   const seeds = parseArgs();
   console.log(`\n🔍 Research starting — ${seeds.length} seeds: ${seeds.join(", ")}\n`);
 
-  // Step 1: Scrape Etsy data for each seed
-  console.log("📥 Fetching Etsy listings...");
+  // Step 1: Fetch Google Trends data for each seed (sequential — Trends rate-limits hard)
+  console.log("📥 Fetching Google Trends data...");
   const nicheData = await withConcurrency(seeds, async (keyword) => {
-    process.stdout.write(`  Scraping "${keyword}"... `);
+    process.stdout.write(`  Trends "${keyword}"... `);
     const data = await searchNiche(keyword);
-    console.log(`${data.totalListings} listings, avg $${data.avgPrice.toFixed(2)}`);
+    console.log(
+      `avg=${data.avgInterest.toFixed(0)}, peak=${data.peakInterest}, trend=${data.trend}`
+    );
     return data;
-  });
+  }, 1);
 
   // Step 2: Analyze each niche with Gemini Pro (sequential to avoid rate limits)
   console.log("\n🤖 Analyzing with Gemini Pro...");
   const analyses = [];
   for (const data of nicheData) {
-    if (data.totalListings === 0) {
-      console.log(`  Skipping "${data.keyword}" — no listings found`);
+    if (data.samplePoints === 0) {
+      console.log(`  Skipping "${data.keyword}" — no Trends data`);
       continue;
     }
     process.stdout.write(`  Analyzing "${data.keyword}"... `);
@@ -100,7 +102,9 @@ async function main() {
   console.log(`\n✅ Guardado en ${filename}\n`);
 }
 
-main().catch((err) => {
-  console.error("Research failed:", err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error("Research failed:", err);
+    process.exit(1);
+  });

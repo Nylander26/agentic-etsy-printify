@@ -7,13 +7,14 @@ const schema = z.object({
     keywords_seed: z.array(z.string()),
     max_niches: z.number().int().min(1).max(20),
     min_demand_score: z.number().min(1).max(10),
-    listings_per_keyword: z.number().int().min(10).max(100).default(50),
+    geo: z.string().default("US"),
   }),
   generation: z.object({
     designs_per_niche: z.number().int().min(1).max(20),
     products: z.array(z.enum(["tshirt", "mug", "poster"])),
     variations_per_design: z.number().int().default(3),
     style_preference: z.string().default("minimalist, clean"),
+    remove_background: z.boolean().default(false),
   }),
   publishing: z.object({
     margin_percent: z.number().min(10).max(80).default(50),

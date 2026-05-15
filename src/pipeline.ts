@@ -20,14 +20,15 @@ import {
   saveDesign,
   savePublishedProduct,
 } from "./lib/db.js";
-import { searchNiche } from "./research/etsy-scraper.js";
+import { searchNiche } from "./research/trends-source.js";
 import { analyzeNiche, rankNiches } from "./research/niche-analyzer.js";
 import { generateAllVariations } from "./generator/image-generator.js";
 import { postProcess } from "./generator/post-processor.js";
-import { getShops, uploadImageBase64, createProduct, publishProduct } from "./lib/printify.js";
+import { getShops, uploadImageBase64, createProduct } from "./lib/printify.js";
 import { generateSEO } from "./publisher/seo.js";
 import { calculatePrice } from "./publisher/pricing.js";
 import { BLUEPRINT_MAP } from "./publisher/blueprint-map.js";
+import { writeEtsyPack, type EtsyPackEntry } from "./publisher/etsy-pack.js";
 import type { ProductType, DesignMetadata } from "./generator/types.js";
 import type { NicheAnalysis } from "./research/types.js";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
@@ -90,11 +91,11 @@ async function runResearch(): Promise<NicheAnalysis[]> {
       continue;
     }
 
-    process.stdout.write(`  Scraping "${keyword}"... `);
-    const data = await searchNiche(keyword, config.research.listings_per_keyword);
-    console.log(`${data.totalListings} listings`);
+    process.stdout.write(`  Trends "${keyword}"... `);
+    const data = await searchNiche(keyword, config.research.geo);
+    console.log(`avg=${data.avgInterest.toFixed(0)}, trend=${data.trend}`);
 
-    if (data.totalListings === 0) continue;
+    if (data.samplePoints === 0) continue;
 
     process.stdout.write(`  Analizando con Gemini... `);
     try {
@@ -191,7 +192,7 @@ async function runPause(niches: NicheAnalysis[], totalDesigns: number): Promise<
 // ── Phase 4: Publish ──────────────────────────────────────────────────────────
 
 async function runPublish(): Promise<number> {
-  console.log("\n🚀 [4/4] Publicación");
+  console.log("\n🚀 [4/4] Publicación (Printify DRAFT + Etsy pack)");
 
   const approved = findApprovedDesigns();
   const toPublish = approved.slice(0, config.publishing.max_publish_per_run);
@@ -205,8 +206,9 @@ async function runPublish(): Promise<number> {
   const shop = shops[0];
   if (!shop) throw new Error("No Printify shop found");
 
-  console.log(`  Publicando ${toPublish.length} diseños en "${shop.title}"...`);
-  let published = 0;
+  console.log(`  Creando ${toPublish.length} drafts en "${shop.title}"...`);
+  let drafted = 0;
+  const packEntries: EtsyPackEntry[] = [];
 
   for (const { meta, metaPath } of toPublish) {
     try {
@@ -239,25 +241,42 @@ async function runPublish(): Promise<number> {
         }],
       });
 
-      await publishProduct(shop.id, product.id);
+      // Product remains as DRAFT in Printify — user publishes manually
       savePublishedProduct(meta.id, product.id, seo.title, pricing.suggestedPrice);
 
-      // Update metadata status
-      const updatedMeta = { ...meta, printifyProductId: product.id, publishedAt: new Date().toISOString() };
+      const updatedMeta = { ...meta, printifyProductId: product.id, draftedAt: new Date().toISOString() };
       writeFileSync(metaPath, JSON.stringify(updatedMeta, null, 2));
 
-      console.log(`  ✅ "${seo.title.slice(0, 50)}..."`);
-      published++;
+      packEntries.push({
+        designId: meta.id,
+        niche: meta.niche,
+        product: meta.product,
+        printifyProductId: product.id,
+        title: seo.title,
+        description: seo.description,
+        tags: seo.tags ?? [],
+        suggestedPrice: pricing.suggestedPrice,
+      });
+
+      console.log(`  ✅ DRAFT "${seo.title.slice(0, 50)}..."`);
+      drafted++;
     } catch (err) {
       console.error(`  ❌ ${meta.id}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
-  if (config.pipeline.notify_telegram) {
-    await notifyPublished(published);
+  if (packEntries.length > 0) {
+    const packPath = writeEtsyPack(packEntries);
+    console.log(`\n  📦 Etsy pack: ${packPath}`);
+    console.log(`  → Publica manualmente desde Printify dashboard ("Publish to Etsy")`);
+    console.log(`     o usa el pack JSON para crear los listings en Etsy.`);
   }
 
-  return published;
+  if (config.pipeline.notify_telegram) {
+    await notifyPublished(drafted);
+  }
+
+  return drafted;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -294,7 +313,7 @@ async function main() {
     console.log("✅ Pipeline completado:");
     console.log(`   Nichos investigados: ${stats.nichesFound}`);
     console.log(`   Diseños generados:   ${stats.designsGenerated}`);
-    console.log(`   Publicados en Etsy:  ${stats.designsPublished}`);
+    console.log(`   Drafts en Printify:  ${stats.designsPublished}`);
     console.log();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

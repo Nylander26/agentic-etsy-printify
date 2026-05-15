@@ -1,22 +1,13 @@
-export interface RawListing {
-  listing_id: number;
-  title: string;
-  description: string;
-  price: { amount: number; divisor: number; currency_code: string };
-  views: number;
-  num_favorers: number;
-  tags: string[];
-  creation_tsz: number; // shop listing age proxy
-  shop_id: number;
-}
-
 export interface NicheData {
   keyword: string;
-  listings: RawListing[];
-  avgPrice: number;
-  avgFavorers: number;
-  avgViews: number;
-  totalListings: number;
+  geo: string;
+  avgInterest: number;       // 0–100 (Google Trends scale)
+  peakInterest: number;      // 0–100
+  trend: "rising" | "stable" | "declining";
+  topQueries: string[];      // related top searches
+  risingQueries: string[];   // related rising searches
+  relatedTopics: string[];
+  samplePoints: number;      // weeks of timeline data
 }
 
 export interface DesignIdea {
@@ -28,13 +19,13 @@ export interface DesignIdea {
 export interface NicheAnalysis {
   keyword: string;
   demandScore: number;       // 1–10
-  competitionScore: number;  // 1–10
-  avgPrice: number;
+  competitionScore: number;  // 1–10 (estimated by Gemini, since we lack direct data)
+  avgPrice: number;          // estimated typical POD price for this niche (USD)
   estimatedMonthlySales: number;
   subNiches: string[];
   designIdeas: DesignIdea[];
   seoKeywords: string[];
-  score: number;             // ranking formula result
+  score: number;
 }
 
 export interface ResearchResult {

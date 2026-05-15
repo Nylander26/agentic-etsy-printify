@@ -1,22 +1,25 @@
 /**
- * Semana 4 entregable — publicador.
- * Uso: pnpm publish
- * Lee diseños en approved/, sube a Printify, genera SEO, publica en Etsy.
+ * Publicador — crea drafts en Printify y genera un Etsy pack para publicación manual.
+ * Uso: pnpm publish-drafts
+ *
+ * Lee diseños en approved/, sube imágenes a Printify, genera SEO con Gemini,
+ * crea el producto como DRAFT en Printify y vuelca un pack JSON/MD con todo el copy
+ * listo para copiar a Etsy o para publicar desde el dashboard de Printify.
+ *
+ * (No usa la API de Etsy — no requiere cuenta dev aprobada.)
  */
-import { readFileSync, writeFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
+import { join, dirname } from "path";
 import {
   getShops,
   uploadImageBase64,
   createProduct,
-  publishProduct,
 } from "../lib/printify.js";
 import { generateSEO } from "./seo.js";
 import { calculatePrice } from "./pricing.js";
 import { BLUEPRINT_MAP } from "./blueprint-map.js";
+import { writeEtsyPack, type EtsyPackEntry } from "./etsy-pack.js";
 import type { DesignMetadata } from "../generator/types.js";
-
-// ── Find approved designs ─────────────────────────────────────────────────────
 
 interface ApprovedDesign {
   meta: DesignMetadata;
@@ -49,55 +52,54 @@ function findApprovedDesigns(): ApprovedDesign[] {
   return results;
 }
 
-// ── Mark as published ─────────────────────────────────────────────────────────
-
-interface PublishedMeta extends DesignMetadata {
+interface DraftedMeta extends DesignMetadata {
   printifyProductId?: string;
-  publishedAt?: string;
+  draftedAt?: string;
 }
 
-function markPublished(metaPath: string, meta: DesignMetadata, printifyId: string) {
-  const updated: PublishedMeta = {
+function markDrafted(metaPath: string, meta: DesignMetadata, printifyId: string) {
+  const updated: DraftedMeta = {
     ...meta,
-    status: "approved", // keep approved — separate field tracks publish
     printifyProductId: printifyId,
-    publishedAt: new Date().toISOString(),
+    draftedAt: new Date().toISOString(),
   };
   writeFileSync(metaPath, JSON.stringify(updated, null, 2));
 }
 
-// ── Publish one design ────────────────────────────────────────────────────────
-
-async function publishDesign(
+async function draftDesign(
   shopId: string,
   { meta, metaPath }: ApprovedDesign
-): Promise<boolean> {
+): Promise<EtsyPackEntry | null> {
   const blueprint = BLUEPRINT_MAP[meta.product];
 
-  // 1. Determine image to upload (prefer no-bg for tshirts)
-  const imagePath = meta.product === "tshirt" && meta.files.noBg
-    ? meta.files.noBg
-    : meta.files.original;
+  // Resolve image: prefer noBg (tshirts), then meta.files.original, then fallback to
+  // resized.png in same dir (covers metadata pointing to a stale filename).
+  const candidates = [
+    meta.product === "tshirt" ? meta.files.noBg : undefined,
+    meta.files.original,
+    join(dirname(meta.files.original), "resized.png"),
+  ].filter((p): p is string => !!p);
+
+  const imagePath = candidates.find((p) => existsSync(p));
+  if (!imagePath) {
+    throw new Error(`Image not found. Tried: ${candidates.join(", ")}`);
+  }
 
   const imageBuffer = readFileSync(imagePath);
   const base64 = imageBuffer.toString("base64");
 
-  // 2. Upload image to Printify
   process.stdout.write("    Uploading image to Printify... ");
   const uploaded = await uploadImageBase64(`${meta.id}.png`, base64);
   console.log(`✓ (${uploaded.id})`);
 
-  // 3. Calculate price
   const pricing = calculatePrice(meta.product, { marginPercent: 50 });
   const priceInCents = Math.round(pricing.suggestedPrice * 100);
 
-  // 4. Generate SEO with Gemini
   process.stdout.write("    Generating SEO metadata... ");
   const seo = await generateSEO(meta, [], pricing.suggestedPrice);
   console.log(`✓ "${seo.title.slice(0, 60)}..."`);
 
-  // 5. Create product in Printify
-  process.stdout.write("    Creating Printify product... ");
+  process.stdout.write("    Creating Printify DRAFT... ");
   const product = await createProduct({
     shopId,
     title: seo.title,
@@ -125,16 +127,20 @@ async function publishDesign(
   });
   console.log(`✓ (${product.id})`);
 
-  // 6. Publish to Etsy via Printify
-  process.stdout.write("    Publishing to Etsy... ");
-  await publishProduct(shopId, product.id);
-  console.log("✓ LIVE");
+  // Product stays as DRAFT in Printify — no auto-publish to Etsy.
+  markDrafted(metaPath, meta, product.id);
 
-  markPublished(metaPath, meta, product.id);
-  return true;
+  return {
+    designId: meta.id,
+    niche: meta.niche,
+    product: meta.product,
+    printifyProductId: product.id,
+    title: seo.title,
+    description: seo.description,
+    tags: seo.tags ?? [],
+    suggestedPrice: pricing.suggestedPrice,
+  };
 }
-
-// ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
   const approved = findApprovedDesigns();
@@ -145,26 +151,33 @@ async function main() {
     process.exit(0);
   }
 
-  // Get Printify shop ID
   const shops = await getShops();
-  const shop = shops[0];
+  // Prefer the Etsy-linked shop; fall back to first available
+  const shop = shops.find((s) => s.sales_channel === "etsy") ?? shops[0];
   if (!shop) {
-    console.error("No Printify shop found. Connect your Etsy store in Printify first.");
+    console.error("No Printify shop found. Vincula tu tienda en Printify primero.");
     process.exit(1);
   }
+  if (shop.sales_channel !== "etsy") {
+    console.warn(`⚠️  Ninguna tienda Etsy vinculada — usando "${shop.title}" (${shop.sales_channel}).`);
+  }
 
-  console.log(`\n🚀 Publicando ${approved.length} diseños en "${shop.title}"\n`);
+  console.log(`\n🚀 Creando ${approved.length} drafts en "${shop.title}"\n`);
   console.log("─".repeat(60));
 
-  const stats = { published: 0, failed: 0 };
+  const packEntries: EtsyPackEntry[] = [];
+  const stats = { drafted: 0, failed: 0 };
 
   for (let i = 0; i < approved.length; i++) {
     const item = approved[i] as ApprovedDesign;
     console.log(`\n  [${i + 1}/${approved.length}] ${item.meta.id}`);
 
     try {
-      await publishDesign(shop.id, item);
-      stats.published++;
+      const entry = await draftDesign(shop.id, item);
+      if (entry) {
+        packEntries.push(entry);
+        stats.drafted++;
+      }
     } catch (err) {
       console.error(`    ❌ Error: ${err instanceof Error ? err.message : err}`);
       stats.failed++;
@@ -172,13 +185,22 @@ async function main() {
   }
 
   console.log("\n" + "─".repeat(60));
-  console.log(`\n✅ Publicación completada:`);
-  console.log(`   Publicados: ${stats.published}`);
-  if (stats.failed > 0) console.log(`   Errores:    ${stats.failed}`);
+  console.log(`\n✅ Drafts creados: ${stats.drafted}`);
+  if (stats.failed > 0) console.log(`   Errores: ${stats.failed}`);
+
+  if (packEntries.length > 0) {
+    const packPath = writeEtsyPack(packEntries);
+    console.log(`\n📦 Etsy pack: ${packPath}`);
+    console.log("\nSiguiente paso (manual):");
+    console.log("  A) Printify dashboard → Products → 'Publish' a tu tienda Etsy");
+    console.log("  B) O abre el .md del pack y copia-pega título/descripción/tags en Etsy");
+  }
   console.log();
 }
 
-main().catch((err) => {
-  console.error("Publisher failed:", err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error("Publisher failed:", err);
+    process.exit(1);
+  });

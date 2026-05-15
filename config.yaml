@@ -6,7 +6,7 @@ research:
     - "hiking lover"
   max_niches: 5
   min_demand_score: 6
-  listings_per_keyword: 50
+  geo: "US"   # Google Trends region code (US, ES, MX, GB, ...)
 
 generation:
   designs_per_niche: 5
@@ -16,13 +16,14 @@ generation:
     - poster
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
   style_preference: "minimalist, clean vector"
+  remove_background: false   # @imgly/background-removal-node segfaulta en win+libvips; deja off hasta sustituirla
 
 publishing:
   margin_percent: 50
   max_publish_per_run: 25
 
 gemini:
-  model_text: "gemini-2.5-pro"
+  model_text: "gemini-2.5-flash"
   model_image: "gemini-3.1-flash-image-preview"
   max_image_requests_per_minute: 8
 
