@@ -68,6 +68,23 @@ export async function getPrintProviders(blueprintId: number): Promise<PrintProvi
   return res.data;
 }
 
+export interface CatalogVariant {
+  id: number;
+  title: string; // e.g. "Black / S"
+  options: { color?: string; size?: string; [k: string]: string | undefined };
+  placeholders?: Array<{ position: string; height: number; width: number }>;
+}
+
+export async function getCatalogVariants(
+  blueprintId: number,
+  printProviderId: number
+): Promise<CatalogVariant[]> {
+  const res = await http.get<{ variants: CatalogVariant[] }>(
+    `/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/variants.json`
+  );
+  return res.data.variants;
+}
+
 // ── Image upload ──────────────────────────────────────────────────────────────
 
 export async function uploadImageBase64(
@@ -118,6 +135,43 @@ export async function createProduct(input: CreateProductInput): Promise<Printify
     }
   );
   return res.data;
+}
+
+export interface ProductMockup {
+  src: string;
+  variant_ids: number[];
+  position: string;
+  is_default: boolean;
+  is_selected_for_publishing: boolean;
+}
+
+export interface FullProduct extends PrintifyProduct {
+  images: ProductMockup[];
+}
+
+export async function getProduct(shopId: string, productId: string): Promise<FullProduct> {
+  const res = await http.get<FullProduct>(`/shops/${shopId}/products/${productId}.json`);
+  return res.data;
+}
+
+/**
+ * Selects which auto-generated mockups Printify will push to the sales channel.
+ * Printify keys mockups by their `src` URL — pass the URLs to enable for publishing.
+ */
+export async function updateMockupSelection(
+  shopId: string,
+  productId: string,
+  selectedSrcs: string[]
+): Promise<void> {
+  const selectedSet = new Set(selectedSrcs);
+  const product = await getProduct(shopId, productId);
+
+  const images = product.images.map((img) => ({
+    ...img,
+    is_selected_for_publishing: selectedSet.has(img.src),
+  }));
+
+  await http.put(`/shops/${shopId}/products/${productId}.json`, { images });
 }
 
 // Note: Printify's POST /products/{id}/publish.json triggers sales-channel publishing.

@@ -8,6 +8,20 @@ export interface NicheData {
   risingQueries: string[];   // related rising searches
   relatedTopics: string[];
   samplePoints: number;      // weeks of timeline data
+  marketplace: MarketplaceSignals; // Etsy marketplace stats (via EverBee)
+}
+
+export interface MarketplaceSignals {
+  source: "everbee" | "none";
+  listingCount: number | null;        // total listings on Etsy for this keyword
+  avgPrice: number | null;            // avg price across sampled listings (USD)
+  minPrice: number | null;
+  maxPrice: number | null;
+  estMonthlyRevenue: number | null;   // avg monthly revenue per top listing (USD)
+  estMonthlySales: number | null;     // avg monthly sales per top listing
+  sampledListings: number;
+  titles: string[];                   // top listing titles for prompt context
+  topTags: string[];                  // popular tags for SEO context
 }
 
 export interface DesignIdea {
@@ -19,12 +33,15 @@ export interface DesignIdea {
 export interface NicheAnalysis {
   keyword: string;
   demandScore: number;       // 1–10
-  competitionScore: number;  // 1–10 (estimated by Gemini, since we lack direct data)
-  avgPrice: number;          // estimated typical POD price for this niche (USD)
+  competitionScore: number;  // 1–10 (from Etsy listing count when available)
+  avgPrice: number;          // scraped avg or estimated typical POD price (USD)
   estimatedMonthlySales: number;
   subNiches: string[];
   designIdeas: DesignIdea[];
   seoKeywords: string[];
+  marketplaceSource: "everbee" | "none";
+  listingCount: number | null;
+  estMonthlyRevenue: number | null;
   score: number;
 }
 

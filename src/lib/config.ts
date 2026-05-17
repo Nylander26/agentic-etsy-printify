@@ -19,6 +19,9 @@ const schema = z.object({
   publishing: z.object({
     margin_percent: z.number().min(10).max(80).default(50),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
+    // If set, each approved design is also drafted on these extra product types,
+    // re-using the same source artwork resized to each target's print dimensions.
+    fan_out_products: z.array(z.enum(["tshirt", "mug", "poster"])).optional(),
   }),
   gemini: z.object({
     model_text: z.string().default("gemini-2.0-flash"),

@@ -161,4 +161,4 @@ pipeline.sqlite                   ← estado, deduplicación, histórico de runs
 **Background removal off por defecto.** `@imgly/background-removal-node` segfaulta en Windows con libvips actual. Hasta sustituir la lib, los diseños se guardan con el fondo original (Printify acepta fondo blanco perfectamente para muchos casos). Para reactivar: `generation.remove_background: true` en config.yaml.
 
 **Blueprint IDs de Printify** ([src/publisher/blueprint-map.ts](src/publisher/blueprint-map.ts)):
-- Los IDs de variantes (tallas, colores) son aproximados. Verifica con `pnpm test:apis` que los blueprint IDs corresponden a los productos que tienes configurados en tu tienda Printify.
+- IDs verificados contra la API en mayo 2026. Cuando Printify los cambie verás error `8251` al publicar. Cómo refrescarlos: [docs/blueprints.md](docs/blueprints.md).

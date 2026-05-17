@@ -1,6 +1,6 @@
 export type ProductType = "tshirt" | "mug" | "poster";
 
-export type VariationKind = "base" | "dark" | "no-text";
+export type VariationKind = "base" | "dark" | "no-text" | "minimal";
 
 export interface DesignMetadata {
   id: string;                   // e.g. "funny-cat-001-base"

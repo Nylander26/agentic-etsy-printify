@@ -21,32 +21,51 @@ export interface BlueprintConfig {
 
 export const BLUEPRINT_MAP: Record<ProductType, BlueprintConfig> = {
   tshirt: {
+    // Blueprint 5 = Unisex Jersey Short Sleeve Tee — Monster Digital provider 29
+    // 3 top-seller colors (Black, White, Midnight Navy) × S-2XL.
+    // Variant IDs confirmed via `pnpm list:variants 5 29`.
     blueprintId: 5,
-    printProviderId: 29,        // Monster Digital (fast, good quality)
+    printProviderId: 29,
     defaultVariants: [
-      { id: 17887, price: 0 },  // S
-      { id: 17888, price: 0 },  // M
-      { id: 17889, price: 0 },  // L
-      { id: 17890, price: 0 },  // XL
-      { id: 17891, price: 0 },  // 2XL
+      // Solid Black
+      { id: 17427, price: 0 },  // S
+      { id: 17428, price: 0 },  // M
+      { id: 17429, price: 0 },  // L
+      { id: 17430, price: 0 },  // XL
+      { id: 17431, price: 0 },  // 2XL
+      // Solid White
+      { id: 17643, price: 0 },  // S
+      { id: 17644, price: 0 },  // M
+      { id: 17645, price: 0 },  // L
+      { id: 17646, price: 0 },  // XL
+      { id: 17647, price: 0 },  // 2XL
+      // Solid Midnight Navy
+      { id: 17562, price: 0 },  // S
+      { id: 17563, price: 0 },  // M
+      { id: 17564, price: 0 },  // L
+      { id: 17565, price: 0 },  // XL
+      { id: 17566, price: 0 },  // 2XL
     ],
     printPosition: "front",
   },
   mug: {
-    blueprintId: 459,
-    printProviderId: 1,         // Printify Choice
+    // Blueprint 68 = Mug 11oz — SPOKE Custom Products (only provider available)
+    blueprintId: 68,
+    printProviderId: 1,
     defaultVariants: [
-      { id: 65306, price: 0 },  // 11oz white
+      { id: 33719, price: 0 },  // 11oz
     ],
     printPosition: "front",
   },
   poster: {
-    blueprintId: 15,
-    printProviderId: 1,
+    // Blueprint 282 = Matte Vertical Posters — Sensaria provider
+    blueprintId: 282,
+    printProviderId: 2,
     defaultVariants: [
-      { id: 1,  price: 0 },    // 12×16
-      { id: 2,  price: 0 },    // 16×20
-      { id: 3,  price: 0 },    // 18×24
+      { id: 43135, price: 0 },  // 11" x 14"
+      { id: 43138, price: 0 },  // 12" x 18"
+      { id: 43141, price: 0 },  // 16" x 20"
+      { id: 43144, price: 0 },  // 18" x 24"
     ],
     printPosition: "front",
   },

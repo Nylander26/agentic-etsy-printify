@@ -16,11 +16,17 @@ generation:
     - poster
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
   style_preference: "minimalist, clean vector"
-  remove_background: false   # @imgly/background-removal-node segfaulta en win+libvips; deja off hasta sustituirla
+  remove_background: true    # sharp color-key (Windows-safe). Designs must keep a clean white backdrop.
 
 publishing:
   margin_percent: 50
   max_publish_per_run: 25
+  # Auto-publish each approved design on these extra product types too
+  # (the source image is resized to each target's print dimensions on the fly).
+  fan_out_products:
+    - tshirt
+    - mug
+    - poster
 
 gemini:
   model_text: "gemini-2.5-flash"

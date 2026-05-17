@@ -11,6 +11,7 @@
     "pipeline": "tsx src/pipeline.ts",
     "stats": "tsx src/monitor/index.ts",
     "test:apis": "tsx src/test-apis.ts",
+    "list:variants": "tsx scripts/list-variants.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
   },

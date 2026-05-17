@@ -123,5 +123,17 @@ export async function searchNiche(keyword: string, geo = "US"): Promise<NicheDat
     risingQueries,
     relatedTopics,
     samplePoints: timeline.length,
+    marketplace: {
+      source: "none",
+      listingCount: null,
+      avgPrice: null,
+      minPrice: null,
+      maxPrice: null,
+      estMonthlyRevenue: null,
+      estMonthlySales: null,
+      sampledListings: 0,
+      titles: [],
+      topTags: [],
+    },
   };
 }

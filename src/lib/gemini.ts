@@ -14,12 +14,37 @@ export async function generateText(prompt: string): Promise<string> {
   return result.response.text();
 }
 
+/**
+ * Calls Gemini in strict JSON mode and parses the response.
+ *
+ * `responseMimeType: application/json` forces the model to emit a valid JSON
+ * literal (no markdown fences, no stray prose). The model still occasionally
+ * emits a malformed string (unescaped quotes inside long descriptions), so we
+ * retry once before giving up.
+ */
 export async function generateJSON<T>(prompt: string): Promise<T> {
-  const raw = await generateText(
-    `${prompt}\n\nRespond with valid JSON only. No markdown, no explanation.`
-  );
-  const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-  return JSON.parse(cleaned) as T;
+  const jsonModel = genAI.getGenerativeModel({
+    model: cfg.gemini.model_text,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    generationConfig: { responseMimeType: "application/json" } as any,
+  });
+
+  const attempt = async (): Promise<T> => {
+    const result = await jsonModel.generateContent(prompt);
+    const raw = result.response.text();
+    const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    return JSON.parse(cleaned) as T;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      // One retry on JSON parse failure
+      return await attempt();
+    }
+    throw err;
+  }
 }
 
 // ── Image client ──────────────────────────────────────────────────────────────
