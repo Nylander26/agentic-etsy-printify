@@ -7,8 +7,21 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { generateAllVariations } from "./image-generator.js";
 import { postProcess } from "./post-processor.js";
-import type { ProductType, DesignMetadata } from "./types.js";
+import type { ProductType, DesignMetadata, NicheContext } from "./types.js";
 import type { ResearchResult, NicheAnalysis, DesignIdea } from "../research/types.js";
+
+function nicheContextFromAnalysis(n: NicheAnalysis): NicheContext {
+  return {
+    keyword: n.keyword,
+    demandScore: n.demandScore,
+    competitionScore: n.competitionScore,
+    topTitles: [],   // niche-analyzer doesn't currently surface raw titles; left empty here
+    topTags: n.seoKeywords ?? [],
+    avgPrice: n.avgPrice,
+    trendDirection: "stable",  // populated below when available
+    marketplaceSource: n.marketplaceSource,
+  };
+}
 
 // ── CLI arg parsing ───────────────────────────────────────────────────────────
 
@@ -83,7 +96,8 @@ async function processNiche(
   niche: string,
   ideas: DesignIdea[],
   products: ProductType[],
-  maxDesigns: number
+  maxDesigns: number,
+  nicheContext?: NicheContext
 ): Promise<DesignMetadata[]> {
   const outputDir = getOutputDir(niche);
   const allMetadata: DesignMetadata[] = [];
@@ -106,6 +120,7 @@ async function processNiche(
       product: idea.targetProduct,
       outputDir,
       index: designIndex,
+      ...(nicheContext ? { nicheContext } : {}),
     });
 
     // Post-process each generated design
@@ -133,7 +148,11 @@ async function main() {
 
   console.log("\n🎨 Generator starting...\n" + "─".repeat(60));
 
-  let nichesToProcess: Array<{ niche: string; ideas: DesignIdea[] }> = [];
+  let nichesToProcess: Array<{
+    niche: string;
+    ideas: DesignIdea[];
+    context?: NicheContext;
+  }> = [];
 
   if (fromResearch) {
     const research = loadLatestResearch();
@@ -145,6 +164,7 @@ async function main() {
     nichesToProcess = research.topNiches.map((n: NicheAnalysis) => ({
       niche: n.keyword,
       ideas: n.designIdeas,
+      context: nicheContextFromAnalysis(n),
     }));
   } else if (niche) {
     nichesToProcess = [{ niche, ideas: manualDesignIdeas(niche, products) }];
@@ -155,13 +175,13 @@ async function main() {
 
   const allGenerated: DesignMetadata[] = [];
 
-  for (const { niche: n, ideas } of nichesToProcess) {
-    const generated = await processNiche(n, ideas, products, maxDesigns);
+  for (const { niche: n, ideas, context } of nichesToProcess) {
+    const generated = await processNiche(n, ideas, products, maxDesigns, context);
     allGenerated.push(...generated);
   }
 
   // Summary
-  const pending = allGenerated.filter((m) => m.status === "pending-review").length;
+  const pending = allGenerated.filter((m) => m.status === "pending-validation").length;
   console.log("\n" + "─".repeat(60));
 
   if (pending === 0) {
@@ -171,8 +191,8 @@ async function main() {
 
   console.log(`\n✅ Generación completada:`);
   console.log(`   Total diseños: ${allGenerated.length}`);
-  console.log(`   Pendientes de revisión: ${pending}`);
-  console.log(`\n   Siguiente paso: pnpm review\n`);
+  console.log(`   Pendientes de validación IA: ${pending}`);
+  console.log(`\n   Siguiente paso: pnpm validate\n`);
 }
 
 main()

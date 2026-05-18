@@ -3,8 +3,19 @@ import { parse } from "yaml";
 import { z } from "zod";
 
 const schema = z.object({
+  market: z
+    .object({
+      country: z.string().length(2).default("US"),
+      currency: z.string().length(3).default("USD"),
+      language: z.string().length(2).default("en"),
+      audience: z.string().default("US Etsy buyers"),
+    })
+    .default({}),
   research: z.object({
-    keywords_seed: z.array(z.string()),
+    auto_discover: z.boolean().default(false),
+    discovery_window_days: z.number().int().min(1).max(180).default(7),
+    discovery_candidates: z.number().int().min(5).max(100).default(25),
+    keywords_seed: z.array(z.string()).default([]),
     max_niches: z.number().int().min(1).max(20),
     min_demand_score: z.number().min(1).max(10),
     geo: z.string().default("US"),
@@ -16,6 +27,15 @@ const schema = z.object({
     style_preference: z.string().default("minimalist, clean"),
     remove_background: z.boolean().default(false),
   }),
+  validator: z
+    .object({
+      max_regenerations: z.number().int().min(0).max(5).default(2),
+      approval_threshold: z.number().min(1).max(10).default(6.5),
+      borderline_threshold: z.number().min(1).max(10).default(5.0),
+      vision_model: z.string().default("gemini-1.5-pro"),
+      enforce_market_fit: z.boolean().default(true),
+    })
+    .default({}),
   publishing: z.object({
     margin_percent: z.number().min(10).max(80).default(50),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),

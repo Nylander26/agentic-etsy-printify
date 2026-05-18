@@ -7,12 +7,14 @@
  */
 import { writeFileSync, mkdirSync } from "fs";
 import { searchNiche } from "./trends-source.js";
-import { fetchMarketplaceSignals } from "./everbee-source.js";
+import { fetchMarketplaceSignals } from "./apify-source.js";
 import { analyzeNiche, rankNiches } from "./niche-analyzer.js";
+import { discoverNiches } from "./discovery.js";
+import { askApproval } from "../lib/approval.js";
 import { getConfig } from "../lib/config.js";
 import type { ResearchResult, NicheData } from "./types.js";
 
-function parseArgs(): string[] {
+function explicitSeeds(): string[] | null {
   const seedsFlag = process.argv.indexOf("--seeds");
   if (seedsFlag !== -1 && process.argv[seedsFlag + 1]) {
     return (process.argv[seedsFlag + 1] as string)
@@ -20,22 +22,69 @@ function parseArgs(): string[] {
       .map((s) => s.trim())
       .filter(Boolean);
   }
-  const seeds = getConfig().research.keywords_seed;
+  return null;
+}
+
+/**
+ * Resolves the list of seed keywords for this run. Precedence:
+ *   1. --seeds CLI flag (always wins, overrides everything)
+ *   2. auto_discover=true → run discovery + ask user to approve
+ *   3. keywords_seed in config.yaml
+ */
+async function resolveSeeds(): Promise<string[]> {
+  const cliSeeds = explicitSeeds();
+  if (cliSeeds && cliSeeds.length > 0) {
+    console.log(`\n🔑 Usando seeds del CLI: ${cliSeeds.join(", ")}`);
+    return cliSeeds;
+  }
+
+  const cfg = getConfig().research;
+  if (cfg.auto_discover) {
+    const discovered = await discoverNiches();
+    if (discovered.length === 0) {
+      console.error("\n❌ Discovery no devolvió candidatos. Aborta o usa --seeds manualmente.");
+      process.exit(1);
+    }
+
+    const options = discovered.map((n) => ({
+      label: n.keyword,
+      detail: `demand≈${n.expectedDemand}/10 · ${n.listingCount !== null ? n.listingCount.toLocaleString() + " listings" : "listings ?"} · ${n.rationale}`,
+    }));
+
+    const choice = await askApproval(
+      `Discovery encontró ${discovered.length} nichos POD para ${getConfig().market.audience}. ¿Cuáles procesamos?`,
+      options
+    );
+
+    if (choice.kind === "cancel") {
+      console.log("\n⏹  Run cancelado por el usuario.");
+      process.exit(0);
+    }
+    if (choice.kind === "all") return discovered.map((n) => n.keyword);
+    return choice.indices.map((i) => discovered[i]?.keyword).filter((k): k is string => !!k);
+  }
+
+  const seeds = cfg.keywords_seed;
   if (!seeds.length) {
-    console.error('No seeds. Provide --seeds "k1,k2" or fill research.keywords_seed in config.yaml');
+    console.error(
+      'Sin seeds. Opciones:\n' +
+      '  1. CLI:    pnpm research --seeds "k1,k2"\n' +
+      '  2. Auto:   activa research.auto_discover=true en config.yaml\n' +
+      '  3. Manual: llena research.keywords_seed en config.yaml'
+    );
     process.exit(1);
   }
   return seeds;
 }
 
 async function main() {
-  const seeds = parseArgs();
+  const seeds = await resolveSeeds();
   const cfg = getConfig().research;
   console.log(`\n🔍 Research starting — ${seeds.length} seeds [geo=${cfg.geo}]: ${seeds.join(", ")}\n`);
 
   // Step 1: For each seed, fetch Google Trends + Etsy signals sequentially.
   // Both endpoints rate-limit; sequential is the safe path.
-  console.log("📥 Fetching signals (Google Trends + EverBee)...");
+  console.log(`📥 Fetching signals (Google Trends + Apify Etsy, market=${getConfig().market.country})...`);
   const nicheData: NicheData[] = [];
   for (const keyword of seeds) {
     process.stdout.write(`  "${keyword}" — trends...`);

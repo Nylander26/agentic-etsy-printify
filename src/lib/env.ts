@@ -1,13 +1,20 @@
 import "dotenv/config";
 import { z } from "zod";
 
+// Helper: treat empty string env vars as undefined (Zod's optional() accepts
+// "" as a valid string, but for credentials we want explicit "not configured")
+const optionalNonEmpty = z
+  .string()
+  .optional()
+  .transform((v) => (v === undefined || v.trim() === "" ? undefined : v));
+
 const schema = z.object({
   GEMINI_API_KEY: z.string().min(1),
   PRINTIFY_API_TOKEN: z.string().min(1),
-  EVERBEE_API_KEY: z.string().optional(),  // Etsy marketplace stats provider (dev.everbee.io)
-  EVERBEE_API_BASE: z.string().optional(), // override default base URL when API ships
-  TELEGRAM_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_CHAT_ID: z.string().optional(),
+  APIFY_TOKEN: optionalNonEmpty,          // Apify token — scraper-as-a-service for Etsy SERP
+  APIFY_ETSY_ACTOR_ID: optionalNonEmpty,  // override the public Etsy search actor (see plan)
+  TELEGRAM_BOT_TOKEN: optionalNonEmpty,
+  TELEGRAM_CHAT_ID: optionalNonEmpty,
 });
 
 export const env = schema.parse(process.env);

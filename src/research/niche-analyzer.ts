@@ -1,5 +1,5 @@
 import { generateJSON } from "../lib/gemini.js";
-import { competitionFromListings } from "./everbee-source.js";
+import { competitionFromListings } from "./apify-source.js";
 import type { NicheData, NicheAnalysis, DesignIdea } from "./types.js";
 
 interface GeminiNicheResponse {
@@ -29,7 +29,7 @@ ${m.titles.slice(0, 8).map((t) => `  • ${t}`).join("\n") || "  (none)"}
 
 Trust the marketplace data above as ground truth for demand visibility and pricing.`
     : `
-Marketplace signals: NOT AVAILABLE (no EverBee API key configured).
+Marketplace signals: NOT AVAILABLE (no APIFY_TOKEN configured).
 Estimate competition and pricing from your training knowledge of the Etsy POD market.`;
 
   return `

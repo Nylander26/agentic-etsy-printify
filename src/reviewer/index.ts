@@ -59,6 +59,18 @@ function displayDesign(meta: DesignMetadata, index: number, total: number) {
   if (meta.files.noBg) {
     console.log(`  Sin fondo: ${meta.files.noBg}`);
   }
+  if (meta.validation) {
+    const v = meta.validation;
+    const badge = meta.forceApproved ? " (FORCE-APPROVED)" : "";
+    console.log(`  Validador IA: ${v.verdict}${badge} — overall ${v.scores.overall.toFixed(1)}/10`);
+    console.log(`    niche=${v.scores.nicheRelevance} trend=${v.scores.trendAlignment} appeal=${v.scores.commercialAppeal} print=${v.scores.printability}`);
+    if (v.reasons.strengths.length > 0) {
+      console.log(`    + ${v.reasons.strengths.slice(0, 2).join("; ")}`);
+    }
+    if (v.reasons.concerns.length > 0) {
+      console.log(`    ! ${v.reasons.concerns.slice(0, 2).join("; ")}`);
+    }
+  }
   console.log(divider);
   console.log("  [A] Aprobar   [R] Rechazar   [G] Regenerar   [S] Saltar");
   process.stdout.write("  Opción: ");

@@ -1,12 +1,21 @@
+market:
+  country: "US"               # ISO 3166-1 alpha-2 — used by Apify, Trends, validator
+  currency: "USD"             # ISO 4217 — expected currency in Apify listings
+  language: "en"              # ISO 639-1 — expected listing language
+  audience: "US Etsy buyers"  # free text injected into validator's system prompt
+
 research:
-  keywords_seed:
-    - "funny cat"
-    - "dog mom"
-    - "nurse life"
-    - "hiking lover"
+  # When auto_discover=true, the pipeline ignores keywords_seed and instead pulls
+  # current trending searches in the configured market via Google Trends, filters
+  # them through Gemini for POD-relevance, and asks the user (CLI + Telegram) to
+  # confirm before generating designs. Set to false to use keywords_seed manually.
+  auto_discover: true
+  discovery_window_days: 7        # 7 = weekly, 30 = monthly, 90 = quarterly
+  discovery_candidates: 25        # raw trending searches to pull before filtering
+  keywords_seed: []               # fallback used only when auto_discover=false
   max_niches: 5
   min_demand_score: 6
-  geo: "US"   # Google Trends region code (US, ES, MX, GB, ...)
+  geo: "US"   # Google Trends region code — kept in sync with market.country
 
 generation:
   designs_per_niche: 5
@@ -17,6 +26,13 @@ generation:
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
   style_preference: "minimalist, clean vector"
   remove_background: true    # sharp color-key (Windows-safe). Designs must keep a clean white backdrop.
+
+validator:
+  max_regenerations: 2         # hard cap on auto-regenerations per design (prevents infinite loops)
+  approval_threshold: 6.5      # overall score >= → approved
+  borderline_threshold: 5.0    # between this and approval → borderline (still pending-review)
+  vision_model: "gemini-1.5-pro"  # multimodal model for image evaluation
+  enforce_market_fit: true     # cultural fit with `market.audience` is a hard requirement
 
 publishing:
   margin_percent: 50

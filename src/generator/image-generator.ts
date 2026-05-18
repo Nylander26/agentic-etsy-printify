@@ -2,7 +2,12 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { generateImage } from "../lib/gemini.js";
 import { buildPrompt } from "./prompt-templates.js";
-import type { ProductType, VariationKind, DesignMetadata } from "./types.js";
+import type {
+  ProductType,
+  VariationKind,
+  DesignMetadata,
+  NicheContext,
+} from "./types.js";
 
 const VARIATIONS: VariationKind[] = ["base", "dark", "no-text"];
 
@@ -14,8 +19,22 @@ function slugify(text: string): string {
     .slice(0, 40);
 }
 
-function designId(niche: string, concept: string, product: ProductType, variation: VariationKind, index: number): string {
-  return `${slugify(niche)}-${String(index).padStart(3, "0")}-${product}-${variation}`;
+function designId(
+  niche: string,
+  concept: string,
+  product: ProductType,
+  variation: VariationKind,
+  index: number,
+  regenerationCount = 0
+): string {
+  const base = `${slugify(niche)}-${String(index).padStart(3, "0")}-${product}-${variation}`;
+  return regenerationCount > 0 ? `${base}-r${regenerationCount}` : base;
+}
+
+export interface RegenerationContext {
+  parentId: string;
+  parentCount: number;          // regenerationCount of the parent (new = parentCount + 1)
+  improvementHints: string[];   // from validator's suggestedImprovements
 }
 
 export interface GenerateDesignInput {
@@ -25,6 +44,8 @@ export interface GenerateDesignInput {
   product: ProductType;
   outputDir: string; // e.g. output/2026-04-19/funny-cat
   index: number;     // sequential counter for unique IDs
+  nicheContext?: NicheContext;             // snapshot of research, persisted into metadata
+  regenerationContext?: RegenerationContext; // present when this is a retry after validator rejection
 }
 
 export interface GenerateDesignResult {
@@ -37,7 +58,10 @@ export async function generateDesign(
   input: GenerateDesignInput,
   variation: VariationKind = "base"
 ): Promise<GenerateDesignResult> {
-  const id = designId(input.niche, input.concept, input.product, variation, input.index);
+  const regenCount = input.regenerationContext?.parentCount !== undefined
+    ? input.regenerationContext.parentCount + 1
+    : 0;
+  const id = designId(input.niche, input.concept, input.product, variation, input.index, regenCount);
   const dir = join(input.outputDir, id);
 
   mkdirSync(dir, { recursive: true });
@@ -45,6 +69,13 @@ export async function generateDesign(
   let prompt: string;
   try {
     prompt = await buildPrompt(input.concept, input.style, input.product, variation);
+    // Append validator feedback when regenerating
+    if (input.regenerationContext && input.regenerationContext.improvementHints.length > 0) {
+      const hints = input.regenerationContext.improvementHints
+        .map((h, i) => `${i + 1}. ${h}`)
+        .join("\n");
+      prompt += `\n\nIMPORTANT — incorporate these improvements (previous attempt was rejected by validator):\n${hints}`;
+    }
   } catch (err) {
     return {
       metadata: {} as DesignMetadata,
@@ -76,9 +107,12 @@ export async function generateDesign(
     product: input.product,
     variation,
     prompt,
-    status: "pending-review",
+    status: "pending-validation",
     createdAt: new Date().toISOString(),
     files: { original: originalPath },
+    regenerationCount: regenCount,
+    ...(input.nicheContext ? { nicheContext: input.nicheContext } : {}),
+    ...(input.regenerationContext ? { parentDesignId: input.regenerationContext.parentId } : {}),
   };
 
   writeFileSync(join(dir, "metadata.json"), JSON.stringify(metadata, null, 2));

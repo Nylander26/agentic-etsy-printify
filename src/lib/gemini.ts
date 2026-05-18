@@ -47,6 +47,65 @@ export async function generateJSON<T>(prompt: string): Promise<T> {
   }
 }
 
+// ── Vision client (multimodal, JSON-mode) ────────────────────────────────────
+
+// Vision token bucket — separate from image-generation. Free tier Gemini 1.5
+// Pro is 50 RPD / 2 RPM. Stay below the per-minute cap with a 5-slot window.
+const VISION_RATE_LIMIT = 5;
+const VISION_WINDOW_MS = 60_000;
+const visionTimestamps: number[] = [];
+
+async function waitForVisionSlot(): Promise<void> {
+  const now = Date.now();
+  const cutoff = now - VISION_WINDOW_MS;
+  while (visionTimestamps.length > 0 && (visionTimestamps[0] ?? 0) < cutoff) {
+    visionTimestamps.shift();
+  }
+  if (visionTimestamps.length >= VISION_RATE_LIMIT) {
+    const oldest = visionTimestamps[0] ?? now;
+    const waitMs = VISION_WINDOW_MS - (now - oldest) + 100;
+    await new Promise((r) => setTimeout(r, waitMs));
+    return waitForVisionSlot();
+  }
+  visionTimestamps.push(Date.now());
+}
+
+/**
+ * Sends a base64-encoded image plus a text prompt to a Gemini vision model
+ * (default from `validator.vision_model` in config) and parses the response as
+ * strict JSON. Used by the design validator agent.
+ */
+export async function analyzeImage<T>(
+  imageBase64: string,
+  mimeType: string,
+  prompt: string
+): Promise<T> {
+  const visionModelName = cfg.validator.vision_model;
+  const visionModel = genAI.getGenerativeModel({
+    model: visionModelName,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    generationConfig: { responseMimeType: "application/json", temperature: 0.2 } as any,
+  });
+
+  const attempt = async (): Promise<T> => {
+    await waitForVisionSlot();
+    const result = await visionModel.generateContent([
+      { text: prompt },
+      { inlineData: { data: imageBase64, mimeType } },
+    ]);
+    const raw = result.response.text();
+    const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    return JSON.parse(cleaned) as T;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err instanceof SyntaxError) return await attempt();
+    throw err;
+  }
+}
+
 // ── Image client ──────────────────────────────────────────────────────────────
 
 // Single model — el del config (Nano Banana 2). Si falla, skip.

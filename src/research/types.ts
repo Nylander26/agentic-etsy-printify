@@ -8,11 +8,11 @@ export interface NicheData {
   risingQueries: string[];   // related rising searches
   relatedTopics: string[];
   samplePoints: number;      // weeks of timeline data
-  marketplace: MarketplaceSignals; // Etsy marketplace stats (via EverBee)
+  marketplace: MarketplaceSignals; // Etsy marketplace stats (via Apify scraper-as-a-service)
 }
 
 export interface MarketplaceSignals {
-  source: "everbee" | "none";
+  source: "apify" | "none";
   listingCount: number | null;        // total listings on Etsy for this keyword
   avgPrice: number | null;            // avg price across sampled listings (USD)
   minPrice: number | null;
@@ -39,7 +39,7 @@ export interface NicheAnalysis {
   subNiches: string[];
   designIdeas: DesignIdea[];
   seoKeywords: string[];
-  marketplaceSource: "everbee" | "none";
+  marketplaceSource: "apify" | "none";
   listingCount: number | null;
   estMonthlyRevenue: number | null;
   score: number;

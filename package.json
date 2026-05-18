@@ -4,8 +4,10 @@
   "description": "Automated pipeline: Etsy niche research → AI design generation → Printify publish",
   "type": "module",
   "scripts": {
+    "discover": "tsx src/research/discover-cli.ts",
     "research": "tsx src/research/index.ts",
     "generate": "tsx src/generator/index.ts",
+    "validate": "tsx src/validator/index.ts",
     "review": "tsx src/reviewer/index.ts",
     "publish-drafts": "tsx src/publisher/index.ts",
     "pipeline": "tsx src/pipeline.ts",
