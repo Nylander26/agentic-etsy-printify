@@ -9,10 +9,34 @@ research:
   # current trending searches in the configured market via Google Trends, filters
   # them through Gemini for POD-relevance, and asks the user (CLI + Telegram) to
   # confirm before generating designs. Set to false to use keywords_seed manually.
-  auto_discover: true
+  auto_discover: false
   discovery_window_days: 7        # 7 = weekly, 30 = monthly, 90 = quarterly
   discovery_candidates: 25        # raw trending searches to pull before filtering
-  keywords_seed: []               # fallback used only when auto_discover=false
+  keywords_seed:
+    - "Funny Dad Shirt"
+    - "Best Dad Ever Mug"
+    - "Class of 2026 Graduate"
+    - "Grill Master Dad"
+    - "First Father's Day"
+    - "Girl Dad Apparel"
+    - "Proud Senior Parent"
+    - "Memorial Day USA"
+    - "Summer Vacation Mode"
+    - "Funny Coffee Lover"
+    - "Proud Dog Mom"
+    - "Fishing Dad T-Shirt"
+    - "Dog Dad Gift"
+    - "Future Nurse Grad"
+    - "Graduation Party Decor"
+    - "Patriotic Military Family"
+    - "Lake Life Lover"
+    - "Beach Trip 2026"
+    - "Camping Adventure Shirt"
+    - "BBQ Season Fun"
+    - "Teacher End of Year"
+    - "Plant Mom Gift"
+    - "Last Day of School"
+    - "Mental Health Matters"
   max_niches: 5
   min_demand_score: 6
   geo: "US"   # Google Trends region code — kept in sync with market.country
@@ -31,7 +55,7 @@ validator:
   max_regenerations: 2         # hard cap on auto-regenerations per design (prevents infinite loops)
   approval_threshold: 6.5      # overall score >= → approved
   borderline_threshold: 5.0    # between this and approval → borderline (still pending-review)
-  vision_model: "gemini-1.5-pro"  # multimodal model for image evaluation
+  vision_model: "gemini-2.5-flash"  # multimodal model for image evaluation
   enforce_market_fit: true     # cultural fit with `market.audience` is a hard requirement
 
 publishing:

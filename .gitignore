@@ -15,6 +15,9 @@ data/etsy-packs/
 *.sqlite
 *.db
 
+# Apify scrape cache (24h TTL, regenerated on demand)
+cache/
+
 # Auth tokens (never commit)
 .etsy-tokens.json
 test-image.png

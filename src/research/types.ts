@@ -1,13 +1,6 @@
 export interface NicheData {
   keyword: string;
   geo: string;
-  avgInterest: number;       // 0–100 (Google Trends scale)
-  peakInterest: number;      // 0–100
-  trend: "rising" | "stable" | "declining";
-  topQueries: string[];      // related top searches
-  risingQueries: string[];   // related rising searches
-  relatedTopics: string[];
-  samplePoints: number;      // weeks of timeline data
   marketplace: MarketplaceSignals; // Etsy marketplace stats (via Apify scraper-as-a-service)
 }
 

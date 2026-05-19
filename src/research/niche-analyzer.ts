@@ -36,15 +36,6 @@ Estimate competition and pricing from your training knowledge of the Etsy POD ma
 You are an Etsy POD (print-on-demand) market analyst.
 
 Niche keyword: "${data.keyword}" (region: ${data.geo})
-
-Google Trends signals (last 12 months, weekly samples=${data.samplePoints}):
-- Average interest (0-100 scale): ${data.avgInterest.toFixed(1)}
-- Peak interest: ${data.peakInterest}
-- Trajectory: ${data.trend}
-
-Top related searches: ${data.topQueries.join(", ") || "(none)"}
-Rising related searches (gaining traction): ${data.risingQueries.join(", ") || "(none)"}
-Related topics: ${data.relatedTopics.join(", ") || "(none)"}
 ${marketplaceBlock}
 
 Respond ONLY with valid JSON:

@@ -7,7 +7,7 @@
  */
 import { generateText, generateImage } from "./lib/gemini.js";
 import { getShops, getBlueprints } from "./lib/printify.js";
-import { searchNiche } from "./research/trends-source.js";
+import { fetchMarketplaceSignals } from "./research/apify-source.js";
 import { writeFileSync } from "fs";
 
 function ok(msg: string) { console.log(`  ✅ ${msg}`); }
@@ -39,18 +39,18 @@ async function testGeminiImage() {
   }
 }
 
-async function testGoogleTrends() {
-  console.log("\n📈 Google Trends...");
+async function testApifyEtsy() {
+  console.log("\n🛒 Apify Etsy scraper...");
   try {
-    const data = await searchNiche("cat lover gifts");
+    const data = await fetchMarketplaceSignals("cat lover gifts");
     ok(
-      `"${data.keyword}": avg=${data.avgInterest.toFixed(1)}, peak=${data.peakInterest}, trend=${data.trend}`
+      `source=${data.source}, listings=${data.listingCount ?? "?"}, sample=${data.sampledListings}, avg=$${data.avgPrice?.toFixed(2) ?? "?"}`
     );
-    if (data.topQueries.length) {
-      console.log(`  Top related: ${data.topQueries.slice(0, 5).join(", ")}`);
+    if (data.titles.length) {
+      console.log(`  Top titles: ${data.titles.slice(0, 3).join(" | ")}`);
     }
   } catch (err) {
-    fail("Google Trends", err);
+    fail("Apify Etsy", err);
   }
 }
 
@@ -84,7 +84,7 @@ async function main() {
 
   await testGeminiText();
   await testGeminiImage();
-  await testGoogleTrends();
+  await testApifyEtsy();
   await testPrintify();
 
   console.log("\n" + "=".repeat(50));

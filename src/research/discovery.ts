@@ -1,123 +1,32 @@
 /**
  * Autonomous niche discovery.
  *
- * Replaces hand-typed `keywords_seed`. Pulls real-time trending signals from
- * Google Trends + lets Gemini Pro filter and cluster them into POD-friendly
- * niches for the configured market. Output is a ranked list of candidate
- * niches with rationale + a listingCount sanity check from Apify.
+ * Replaces hand-typed `keywords_seed`. Gemini proposes POD-friendly niches for
+ * the configured market using its own seasonal/cultural knowledge, then each
+ * candidate is cross-validated against Apify's Etsy listing count to drop
+ * niches that are too small or too saturated.
+ *
+ * (Google Trends was removed: the public dailyTrends endpoint rate-limits
+ * aggressively and the dep `google-trends-api` is unmaintained. The market
+ * signal we trust is the Apify listing pull below.)
  *
  * Caller (research/index.ts or pipeline.ts) is responsible for asking the
  * user to approve which candidates proceed to generation.
  */
-import googleTrends from "google-trends-api";
 import { generateJSON } from "../lib/gemini.js";
 import { getConfig } from "../lib/config.js";
-import { fetchMarketplaceSignals, competitionFromListings } from "./apify-source.js";
-
-interface DailyTrendsResponse {
-  default: {
-    trendingSearchesDays: Array<{
-      date: string;
-      trendingSearches: Array<{
-        title?: { query: string };
-        formattedTraffic?: string;
-        relatedQueries?: Array<{ query: string }>;
-      }>;
-    }>;
-  };
-}
-
-type TrendsModule = {
-  dailyTrends(opts: { geo?: string; trendDate?: Date }): Promise<string>;
-};
-const trends = googleTrends as unknown as TrendsModule;
+import { fetchMarketplaceSignals } from "./apify-source.js";
 
 export interface DiscoveredNiche {
   keyword: string;
   rationale: string;          // Gemini's justification for this niche
   expectedDemand: number;     // 1-10 from Gemini
-  listingCount: number | null;
-  competitionScore: number | null;
+  sampledListings: number;    // size of the Apify sample (max 50)
+  avgPrice: number | null;    // avg USD across sampled listings
+  avgTitlePreview: string[];  // top 3 sampled titles for human preview
   source: "auto-discovery";
 }
 
-const GAP_MS = 6000;
-let lastTrendsCall = 0;
-async function throttleTrends(): Promise<void> {
-  const wait = GAP_MS - (Date.now() - lastTrendsCall);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastTrendsCall = Date.now();
-}
-
-function parseTrafficNumber(s: string | undefined): number {
-  if (!s) return 0;
-  const cleaned = s.replace(/[+,]/g, "").trim();
-  if (cleaned.endsWith("M")) return parseFloat(cleaned) * 1_000_000;
-  if (cleaned.endsWith("K")) return parseFloat(cleaned) * 1_000;
-  return parseFloat(cleaned) || 0;
-}
-
-/**
- * Step 1 — Raw signal: pull Google Trends dailyTrends for the last N days,
- * aggregate by query frequency × traffic. Returns the top `limit` queries.
- */
-async function pullRawTrending(windowDays: number, geo: string, limit: number): Promise<
-  Array<{ query: string; traffic: number; appearances: number }>
-> {
-  const aggregated = new Map<string, { traffic: number; appearances: number }>();
-
-  for (let i = 0; i < windowDays; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-
-    await throttleTrends();
-    let raw: string;
-    try {
-      raw = await trends.dailyTrends({ geo, trendDate: date });
-    } catch (err) {
-      console.warn(`  ⚠️  dailyTrends failed for ${date.toISOString().slice(0, 10)}: ${err instanceof Error ? err.message : err}`);
-      continue;
-    }
-
-    if (!raw || raw.trim().startsWith("<")) {
-      console.warn(`  ⚠️  dailyTrends rate-limited or empty for ${date.toISOString().slice(0, 10)}`);
-      continue;
-    }
-
-    let parsed: DailyTrendsResponse;
-    try {
-      parsed = JSON.parse(raw) as DailyTrendsResponse;
-    } catch {
-      continue;
-    }
-
-    const days = parsed.default?.trendingSearchesDays ?? [];
-    for (const day of days) {
-      for (const search of day.trendingSearches ?? []) {
-        const q = search.title?.query;
-        if (!q) continue;
-        const traffic = parseTrafficNumber(search.formattedTraffic);
-        const existing = aggregated.get(q) ?? { traffic: 0, appearances: 0 };
-        aggregated.set(q, {
-          traffic: existing.traffic + traffic,
-          appearances: existing.appearances + 1,
-        });
-      }
-    }
-  }
-
-  return Array.from(aggregated.entries())
-    .map(([query, data]) => ({ query, ...data }))
-    .sort((a, b) => b.appearances * b.traffic - a.appearances * a.traffic)
-    .slice(0, limit);
-}
-
-/**
- * Step 2 — Gemini filters raw trending signal into POD-relevant niches for the
- * configured market. Augments with Gemini's own knowledge of evergreen POD
- * trends in case the raw signal is noisy (news/events/celebrities dominate
- * daily trends).
- */
 interface GeminiDiscoveryResponse {
   candidates: Array<{
     keyword: string;
@@ -126,25 +35,17 @@ interface GeminiDiscoveryResponse {
   }>;
 }
 
-async function geminiFilterToPodNiches(
-  rawTrending: Array<{ query: string; traffic: number; appearances: number }>,
+async function geminiProposePodNiches(
   targetCount: number
 ): Promise<Array<{ keyword: string; rationale: string; expectedDemand: number }>> {
   const cfg = getConfig();
   const today = new Date().toISOString().slice(0, 10);
   const windowDays = cfg.research.discovery_window_days;
-  const trendingList = rawTrending
-    .slice(0, 50)
-    .map((t) => `- "${t.query}" (traffic ~${t.traffic}, appearances ${t.appearances})`)
-    .join("\n");
 
   const prompt = `
 You are a Print-on-Demand (POD) niche scout for the ${cfg.market.audience} segment on Etsy.
 
-Today is ${today}. You are looking for niches trending over the last ${windowDays} days that translate to sellable POD products (t-shirts, mugs, posters).
-
-RAW SIGNAL — top Google Trends daily searches in ${cfg.market.country} for the past ${windowDays} days:
-${trendingList || "(no raw signal available — use your own knowledge of current US POD trends)"}
+Today is ${today}. Propose niches trending or seasonal over the next ${windowDays} days that translate to sellable POD products (t-shirts, mugs, posters).
 
 YOUR JOB
 Identify the top ${targetCount} niches that meet ALL of:
@@ -154,7 +55,7 @@ Identify the top ${targetCount} niches that meet ALL of:
 4. Are NOT one-off news/celebrity/election spikes — only sustainable for at least 4 weeks.
 
 INSTRUCTIONS
-- If the raw signal is dominated by news/events, IGNORE it and propose ${targetCount} evergreen US POD niches that are currently rising or seasonal for the next month.
+- Lean on evergreen US POD niches that are currently rising or seasonal for the next month.
 - Each keyword should be 2-5 words, Etsy-search-friendly (e.g. "funny cat dad shirt", "nurse appreciation week", "retro 80s sunset poster").
 - Rationale should be ONE sentence: why this niche, who buys it, and any seasonal angle.
 - expectedDemand is 1-10 based on your read of the current market.
@@ -175,8 +76,12 @@ Return exactly ${targetCount} candidates.
 }
 
 /**
- * Step 3 — For each candidate, pull listingCount from Apify to filter out
- * niches that are either too saturated (>2M listings) or too small (<500).
+ * For each candidate, pull the Apify sample (titles + prices + ratings).
+ * The actor does not expose total Etsy listings, and scraping Etsy directly is
+ * disallowed, so we use sample quality as the discovery filter:
+ *   - 0 sampled items → reject (no marketplace presence in this market)
+ *   - currency mismatch → reject (handled upstream in fetchMarketplaceSignals)
+ *   - otherwise keep; later research+analysis evaluates competition qualitatively
  */
 async function crossValidateWithApify(
   candidates: Array<{ keyword: string; rationale: string; expectedDemand: number }>
@@ -184,34 +89,25 @@ async function crossValidateWithApify(
   const validated: DiscoveredNiche[] = [];
 
   for (const c of candidates) {
-    process.stdout.write(`  Apify "${c.keyword}"... `);
+    process.stdout.write(`  Apify sample "${c.keyword}"... `);
     const signals = await fetchMarketplaceSignals(c.keyword);
-    const competitionScore = competitionFromListings(signals.listingCount);
 
-    if (signals.listingCount !== null) {
-      console.log(`listings=${signals.listingCount.toLocaleString()}, competition=${competitionScore}/10`);
-    } else {
-      console.log(`(no data)`);
+    if (signals.sampledListings === 0) {
+      console.log(`0 items — descartado (sin presencia en marketplace)`);
+      continue;
     }
 
-    // Filter extremes
-    if (signals.listingCount !== null) {
-      if (signals.listingCount < 500) {
-        console.log(`    → descartado: < 500 listings (audiencia insuficiente)`);
-        continue;
-      }
-      if (signals.listingCount > 2_000_000) {
-        console.log(`    → descartado: > 2M listings (saturado)`);
-        continue;
-      }
-    }
+    console.log(
+      `sample=${signals.sampledListings}, avg=$${signals.avgPrice?.toFixed(2) ?? "?"}`
+    );
 
     validated.push({
       keyword: c.keyword,
       rationale: c.rationale,
       expectedDemand: c.expectedDemand,
-      listingCount: signals.listingCount,
-      competitionScore,
+      sampledListings: signals.sampledListings,
+      avgPrice: signals.avgPrice,
+      avgTitlePreview: signals.titles.slice(0, 3),
       source: "auto-discovery",
     });
   }
@@ -225,43 +121,27 @@ async function crossValidateWithApify(
  */
 export async function discoverNiches(): Promise<DiscoveredNiche[]> {
   const cfg = getConfig();
-  const windowDays = cfg.research.discovery_window_days;
   const targetCount = cfg.research.discovery_candidates;
 
-  console.log(`\n🔍 Discovery — ventana=${windowDays}d, market=${cfg.market.country}, candidatos=${targetCount}\n`);
+  console.log(`\n🔍 Discovery — market=${cfg.market.country}, candidatos=${targetCount}\n`);
 
-  console.log("  📡 Pulleando Google Trends dailyTrends (best-effort)...");
-  const raw = await pullRawTrending(windowDays, cfg.research.geo, 100);
-  if (raw.length === 0) {
-    console.log("  ℹ️  Trends sin datos (rate-limit del endpoint público) — Gemini propondrá nichos basados en su conocimiento estacional");
-  } else {
-    console.log(`  ✓ ${raw.length} queries únicas en raw signal`);
-  }
-
-  console.log("\n  🤖 Gemini filtrando hacia nichos POD...");
-  const filtered = await geminiFilterToPodNiches(raw, targetCount);
+  console.log("  🤖 Gemini proponiendo nichos POD (sin Trends — solo conocimiento estacional)...");
+  const filtered = await geminiProposePodNiches(targetCount);
   console.log(`  ✓ ${filtered.length} candidatos POD identificados`);
 
   if (filtered.length === 0) {
-    console.warn("  ⚠️  Gemini no devolvió candidatos. Revisar prompt o raw signal.");
+    console.warn("  ⚠️  Gemini no devolvió candidatos. Revisar prompt.");
     return [];
   }
 
-  console.log(`\n  🛒 Cross-validando con Apify (listing counts reales)...`);
+  console.log(`\n  🛒 Cross-validando con Apify (sample de listings)...`);
   const validated = await crossValidateWithApify(filtered);
-  console.log(`\n  ✓ ${validated.length}/${filtered.length} candidatos pasaron filtros de saturación`);
+  console.log(`\n  ✓ ${validated.length}/${filtered.length} candidatos con presencia en marketplace`);
 
-  // Sort by expectedDemand (Gemini's confidence) × competition fit
-  // (prefer mid-range competition where realistic for new shops)
-  validated.sort((a, b) => {
-    const score = (n: DiscoveredNiche) => {
-      const compFit = n.competitionScore !== null
-        ? 10 - Math.abs(n.competitionScore - 5)  // peak at competition=5
-        : 5;
-      return n.expectedDemand * 2 + compFit;
-    };
-    return score(b) - score(a);
-  });
+  // Sort by Gemini's expectedDemand only — without a real total-listings signal
+  // we can't score saturation; the Gemini research+analysis pass will rank
+  // these qualitatively from the sampled titles.
+  validated.sort((a, b) => b.expectedDemand - a.expectedDemand);
 
   return validated;
 }

@@ -22,11 +22,15 @@ async function main(): Promise<void> {
   console.log("\n" + "═".repeat(60));
   console.log(`📋 ${discovered.length} nichos descubiertos:`);
   discovered.forEach((n, i) => {
+    const price = n.avgPrice !== null ? `$${n.avgPrice.toFixed(2)}` : "$?";
     console.log(
       `\n  ${i + 1}. "${n.keyword}"\n` +
-      `     demand≈${n.expectedDemand}/10 · listings=${n.listingCount?.toLocaleString() ?? "?"} · comp=${n.competitionScore ?? "?"}/10\n` +
+      `     demand≈${n.expectedDemand}/10 · sample=${n.sampledListings} · avgPrice=${price}\n` +
       `     ${n.rationale}`
     );
+    if (n.avgTitlePreview.length > 0) {
+      console.log(`     sample: ${n.avgTitlePreview.map((t) => `"${t.slice(0, 50)}"`).join(" · ")}`);
+    }
   });
   console.log("\n   Para usarlos: pnpm research  (con auto_discover=true), o pnpm pipeline\n");
 }

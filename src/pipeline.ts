@@ -20,7 +20,6 @@ import {
   saveDesign,
   savePublishedProduct,
 } from "./lib/db.js";
-import { searchNiche } from "./research/trends-source.js";
 import { fetchMarketplaceSignals } from "./research/apify-source.js";
 import { discoverNiches } from "./research/discovery.js";
 import { askApproval } from "./lib/approval.js";
@@ -99,7 +98,7 @@ async function runDiscovery(): Promise<string[]> {
 
   const options = discovered.map((n) => ({
     label: n.keyword,
-    detail: `demand≈${n.expectedDemand}/10 · ${n.listingCount !== null ? n.listingCount.toLocaleString() + " listings" : "listings ?"} · ${n.rationale}`,
+    detail: `demand≈${n.expectedDemand}/10 · sample=${n.sampledListings} · ${n.avgPrice !== null ? "$" + n.avgPrice.toFixed(2) : "$?"} · ${n.rationale}`,
   }));
 
   const choice = await askApproval(
@@ -130,16 +129,16 @@ async function runResearch(seeds: string[]): Promise<NicheAnalysis[]> {
       continue;
     }
 
-    process.stdout.write(`  Trends "${keyword}"... `);
-    const trends = await searchNiche(keyword, config.research.geo);
-    console.log(`avg=${trends.avgInterest.toFixed(0)}, trend=${trends.trend}`);
-
-    if (trends.samplePoints === 0) continue;
-
-    process.stdout.write(`  Apify marketplace... `);
+    process.stdout.write(`  Apify marketplace "${keyword}"... `);
     const marketplace = await fetchMarketplaceSignals(keyword);
     console.log(`source=${marketplace.source}, listings=${marketplace.listingCount ?? "?"}`);
-    const data: NicheData = { ...trends, marketplace };
+
+    if (marketplace.source === "none" && marketplace.listingCount === null) {
+      console.log(`    → sin señal de marketplace, saltado`);
+      continue;
+    }
+
+    const data: NicheData = { keyword, geo: config.research.geo, marketplace };
     marketplaceByKeyword.set(keyword, marketplace);
 
     process.stdout.write(`  Analizando con Gemini... `);

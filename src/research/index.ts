@@ -6,7 +6,6 @@
  * Output: research-results/YYYY-MM-DD.json with ranked niches.
  */
 import { writeFileSync, mkdirSync } from "fs";
-import { searchNiche } from "./trends-source.js";
 import { fetchMarketplaceSignals } from "./apify-source.js";
 import { analyzeNiche, rankNiches } from "./niche-analyzer.js";
 import { discoverNiches } from "./discovery.js";
@@ -48,7 +47,7 @@ async function resolveSeeds(): Promise<string[]> {
 
     const options = discovered.map((n) => ({
       label: n.keyword,
-      detail: `demand≈${n.expectedDemand}/10 · ${n.listingCount !== null ? n.listingCount.toLocaleString() + " listings" : "listings ?"} · ${n.rationale}`,
+      detail: `demand≈${n.expectedDemand}/10 · sample=${n.sampledListings} · ${n.avgPrice !== null ? "$" + n.avgPrice.toFixed(2) : "$?"} · ${n.rationale}`,
     }));
 
     const choice = await askApproval(
@@ -82,28 +81,25 @@ async function main() {
   const cfg = getConfig().research;
   console.log(`\n🔍 Research starting — ${seeds.length} seeds [geo=${cfg.geo}]: ${seeds.join(", ")}\n`);
 
-  // Step 1: For each seed, fetch Google Trends + Etsy signals sequentially.
-  // Both endpoints rate-limit; sequential is the safe path.
-  console.log(`📥 Fetching signals (Google Trends + Apify Etsy, market=${getConfig().market.country})...`);
+  // Step 1: For each seed, fetch Etsy marketplace signals via Apify.
+  console.log(`📥 Fetching Apify Etsy signals (market=${getConfig().market.country})...`);
   const nicheData: NicheData[] = [];
   for (const keyword of seeds) {
-    process.stdout.write(`  "${keyword}" — trends...`);
-    const trends = await searchNiche(keyword, cfg.geo);
-    process.stdout.write(` marketplace...`);
+    process.stdout.write(`  "${keyword}" — marketplace...`);
     const marketplace = await fetchMarketplaceSignals(keyword);
-    const merged: NicheData = { ...trends, marketplace };
+    const merged: NicheData = { keyword, geo: cfg.geo, marketplace };
     nicheData.push(merged);
     console.log(
-      ` ✓ trends_avg=${trends.avgInterest.toFixed(0)}, listings=${marketplace.listingCount ?? "?"}, avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}]`
+      ` ✓ listings=${marketplace.listingCount ?? "?"}, avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}]`
     );
   }
 
-  // Step 2: Gemini analysis — fed with real Etsy + Trends data
+  // Step 2: Gemini analysis — fed with Etsy marketplace data
   console.log("\n🤖 Analyzing with Gemini Pro...");
   const analyses = [];
   for (const data of nicheData) {
-    if (data.samplePoints === 0 && data.marketplace.listingCount === null) {
-      console.log(`  Skipping "${data.keyword}" — no signals from either source`);
+    if (data.marketplace.source === "none" && data.marketplace.listingCount === null) {
+      console.log(`  Skipping "${data.keyword}" — no marketplace signal`);
       continue;
     }
     process.stdout.write(`  Analyzing "${data.keyword}"... `);
