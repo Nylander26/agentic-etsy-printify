@@ -12,15 +12,18 @@
  *   pnpm validate --design <id>        # only the specified design
  *   pnpm validate --no-interactive     # auto-skip rejections (CI mode)
  */
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { readFileSync } from "fs";
 import * as readline from "readline";
 import { analyzeImage } from "../lib/gemini.js";
 import { getConfig } from "../lib/config.js";
+import { walkDesigns } from "../lib/design-store.js";
 import { buildValidatorPrompt, normalizeValidation } from "./criteria.js";
 import {
   handleRejection,
   persistApprovedOrBorderline,
+  promoteToApproved,
+  autoRegenerate,
+  markRejected,
 } from "./loop-control.js";
 import type { DesignMetadata, ValidationResult } from "../generator/types.js";
 
@@ -38,38 +41,10 @@ function parseArgs(): CliArgs {
 }
 
 function findPendingValidation(filterId: string | null): DesignMetadata[] {
-  const results: DesignMetadata[] = [];
-
-  function walk(dir: string): void {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      if (entry === "metadata.json") {
-        try {
-          const meta = JSON.parse(readFileSync(full, "utf-8")) as DesignMetadata;
-          if (meta.status === "pending-validation") {
-            if (filterId === null || meta.id === filterId) results.push(meta);
-          }
-        } catch {
-          // skip malformed
-        }
-      } else {
-        try {
-          if (readdirSync(full)) walk(full);
-        } catch {
-          // not a directory
-        }
-      }
-    }
-  }
-
-  walk("output");
-  return results;
+  return walkDesigns(
+    "output",
+    (m) => m.status === "pending-validation" && (filterId === null || m.id === filterId)
+  ).map((f) => f.meta);
 }
 
 function loadImage(meta: DesignMetadata): { base64: string; mimeType: string } {
@@ -116,14 +91,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`   Diseños a evaluar: ${pending.length}\n`);
+  console.log(`   Diseños a evaluar: ${pending.length}`);
+  console.log(
+    `   Modo: auto_approve_passing=${cfg.validator.auto_approve_passing}, auto_regenerate=${cfg.validator.auto_regenerate}\n`
+  );
 
-  const rl = interactive
-    ? readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
-    : null;
+  const autoApprove = cfg.validator.auto_approve_passing;
+  const autoRegen = cfg.validator.auto_regenerate;
+
+  // readline is only needed for the interactive rejection menu — i.e. manual mode
+  // (interactive AND auto_regenerate disabled). Auto modes never prompt.
+  const rl =
+    interactive && !autoRegen
+      ? readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
+      : null;
 
   const stats = {
-    approved: 0,
+    autoApproved: 0, // approved → approved/ directly (hybrid review)
+    approved: 0,     // approved → pending-review (auto_approve_passing = false)
     borderline: 0,
     rejected: 0,
     regenerated: 0,
@@ -149,8 +134,14 @@ async function main(): Promise<void> {
     printVerdict(meta, verdict);
 
     if (verdict.verdict === "approved") {
-      persistApprovedOrBorderline(meta, verdict);
-      stats.approved++;
+      if (autoApprove) {
+        promoteToApproved(meta, verdict);
+        stats.autoApproved++;
+        console.log("    → auto-aprobado, movido a approved/ (listo para publicar)");
+      } else {
+        persistApprovedOrBorderline(meta, verdict);
+        stats.approved++;
+      }
       continue;
     }
     if (verdict.verdict === "borderline") {
@@ -158,22 +149,36 @@ async function main(): Promise<void> {
       stats.borderline++;
       continue;
     }
+
     // Rejected
-    if (!interactive || !rl) {
-      // CI mode — auto-skip
-      persistApprovedOrBorderline({ ...meta, status: "rejected" } as DesignMetadata, verdict);
-      stats.skipped++;
+    if (autoRegen) {
+      const newDesign = await autoRegenerate(meta, verdict);
+      if (newDesign) {
+        stats.regenerated++;
+        queue.push(newDesign);
+        console.log(`    → regenerado automáticamente: ${newDesign.id} (vuelve a validación)`);
+      } else {
+        markRejected(meta, verdict);
+        stats.rejected++;
+        console.log("    → rechazado (cap de regeneraciones alcanzado o generación falló)");
+      }
       continue;
     }
-    const action = await handleRejection(meta, verdict, rl);
-    if (action.kind === "regenerate") {
-      stats.regenerated++;
-      queue.push(action.newDesign);
-    } else if (action.kind === "force-approve") {
-      stats.forced++;
-    } else {
-      stats.rejected++;
+    if (interactive && rl) {
+      const action = await handleRejection(meta, verdict, rl);
+      if (action.kind === "regenerate") {
+        stats.regenerated++;
+        queue.push(action.newDesign);
+      } else if (action.kind === "force-approve") {
+        stats.forced++;
+      } else {
+        stats.rejected++;
+      }
+      continue;
     }
+    // CI mode (non-interactive, auto_regenerate off): mark rejected
+    markRejected(meta, verdict);
+    stats.skipped++;
   }
 
   rl?.close();
@@ -182,20 +187,23 @@ async function main(): Promise<void> {
   const divider = "─".repeat(60);
   console.log(`\n${divider}`);
   console.log("  Resumen del validador:");
-  console.log(`  ✅ Aprobados:        ${stats.approved}`);
-  console.log(`  🟡 Borderline:       ${stats.borderline}`);
-  console.log(`  ❌ Rechazados:       ${stats.rejected}`);
-  console.log(`  ⚡ Force-approved:   ${stats.forced}`);
-  console.log(`  🔄 Regenerados:      ${stats.regenerated}`);
-  console.log(`  ⏭  Skipped (CI):     ${stats.skipped}`);
-  if (stats.errors > 0) console.log(`  💥 Errores:          ${stats.errors}`);
+  if (autoApprove) console.log(`  ⚡ Auto-aprobados → approved/: ${stats.autoApproved}`);
+  else console.log(`  ✅ Aprobados → review:        ${stats.approved}`);
+  console.log(`  🟡 Borderline → review:       ${stats.borderline}`);
+  console.log(`  ❌ Rechazados:                ${stats.rejected}`);
+  if (stats.forced > 0) console.log(`  ⚡ Force-approved → review:   ${stats.forced}`);
+  console.log(`  🔄 Regenerados:               ${stats.regenerated}`);
+  if (stats.skipped > 0) console.log(`  ⏭  Skipped (CI):              ${stats.skipped}`);
+  if (stats.errors > 0) console.log(`  💥 Errores:                   ${stats.errors}`);
 
   const toReview = stats.approved + stats.borderline + stats.forced;
   if (toReview > 0) {
-    console.log(`\n  Siguiente paso: pnpm review  (${toReview} diseños en pending-review)\n`);
-  } else {
-    console.log("");
+    console.log(`\n  Siguiente paso: pnpm review  (${toReview} diseños en pending-review)`);
   }
+  if (stats.autoApproved > 0) {
+    console.log(`\n  ${stats.autoApproved} auto-aprobados listos: pnpm publish-drafts`);
+  }
+  console.log("");
 }
 
 main()

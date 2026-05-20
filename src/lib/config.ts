@@ -34,11 +34,17 @@ const schema = z.object({
       borderline_threshold: z.number().min(1).max(10).default(5.0),
       vision_model: z.string().default("gemini-1.5-pro"),
       enforce_market_fit: z.boolean().default(true),
+      auto_approve_passing: z.boolean().default(true),
+      auto_regenerate: z.boolean().default(true),
     })
     .default({}),
   publishing: z.object({
     margin_percent: z.number().min(10).max(80).default(50),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
+    // Max base64 upload body to Printify (MB). Above this, the image is palette-quantized
+    // to fit (lossy). Printify's POST body limit is ~10MB; bump if you see needless
+    // quantization, lower if you see HTTP 413.
+    max_upload_mb: z.number().min(1).max(90).default(9),
     // If set, each approved design is also drafted on these extra product types,
     // re-using the same source artwork resized to each target's print dimensions.
     fan_out_products: z.array(z.enum(["tshirt", "mug", "poster"])).optional(),
@@ -46,8 +52,17 @@ const schema = z.object({
   gemini: z.object({
     model_text: z.string().default("gemini-2.0-flash"),
     model_image: z.string().default("gemini-2.0-flash-exp-image-generation"),
+    image_size: z.enum(["512", "1K", "2K", "4K"]).default("2K"),
     max_image_requests_per_minute: z.number().int().min(1).max(10).default(8),
   }),
+  upscaler: z
+    .object({
+      enabled: z.boolean().default(false),
+      binary_path: z.string().default(""),
+      model: z.string().default("realesrgan-x4plus"),
+      scale: z.number().int().min(2).max(4).default(4),
+    })
+    .default({}),
   pipeline: z.object({
     notify_telegram: z.boolean().default(true),
     auto_publish: z.boolean().default(false),

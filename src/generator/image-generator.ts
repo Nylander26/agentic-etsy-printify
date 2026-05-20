@@ -11,6 +11,16 @@ import type {
 
 const VARIATIONS: VariationKind[] = ["base", "dark", "no-text"];
 
+// Native aspect ratio per product so the print resize doesn't letterbox:
+//  - tshirt: centered + bg-removed → transparent padding is invisible, square is fine
+//  - mug:    wide wrap-around (print ~2.57:1) → widest supported ratio avoids white side bars
+//  - poster: portrait, matches the 4800×6000 (4:5) print area exactly → no padding
+const PRODUCT_ASPECT_RATIO: Record<ProductType, string> = {
+  tshirt: "1:1",
+  mug: "21:9",
+  poster: "4:5",
+};
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -86,7 +96,7 @@ export async function generateDesign(
 
   let imageData: { base64: string; mimeType: string };
   try {
-    imageData = await generateImage(prompt);
+    imageData = await generateImage(prompt, { aspectRatio: PRODUCT_ASPECT_RATIO[input.product] });
   } catch (err) {
     return {
       metadata: {} as DesignMetadata,

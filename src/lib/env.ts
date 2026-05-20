@@ -15,6 +15,7 @@ const schema = z.object({
   APIFY_ETSY_ACTOR_ID: optionalNonEmpty,  // override the public Etsy search actor (see plan)
   TELEGRAM_BOT_TOKEN: optionalNonEmpty,
   TELEGRAM_CHAT_ID: optionalNonEmpty,
+  UPSCALER_BINARY_PATH: optionalNonEmpty,  // local realesrgan-ncnn-vulkan .exe — kept out of git
 });
 
 export const env = schema.parse(process.env);

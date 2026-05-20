@@ -8,9 +8,10 @@
  *
  * (No usa la API de Etsy — no requiere cuenta dev aprobada.)
  */
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import axios from "axios";
+import { walkDesigns } from "../lib/design-store.js";
 import {
   getShops,
   uploadImageBase64,
@@ -23,8 +24,9 @@ import { calculatePrice } from "./pricing.js";
 import { BLUEPRINT_MAP } from "./blueprint-map.js";
 import { writeEtsyPack, type EtsyPackEntry } from "./etsy-pack.js";
 import type { DesignMetadata, ProductType } from "../generator/types.js";
-import { resizeForPrintify, removeBackground } from "../generator/post-processor.js";
+import { resizeForPrintify, removeBackground, compressForUpload } from "../generator/post-processor.js";
 import { getConfig } from "../lib/config.js";
+import { upscaleBuffer, isUpscalerEnabled } from "../lib/upscaler.js";
 
 interface ApprovedDesign {
   meta: DesignMetadata;
@@ -32,29 +34,7 @@ interface ApprovedDesign {
 }
 
 function findApprovedDesigns(): ApprovedDesign[] {
-  const results: ApprovedDesign[] = [];
-
-  function walk(dir: string) {
-    let entries: string[];
-    try { entries = readdirSync(dir); } catch { return; }
-
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      if (entry === "metadata.json") {
-        try {
-          const meta = JSON.parse(readFileSync(full, "utf-8")) as DesignMetadata;
-          if (meta.status === "approved") {
-            results.push({ meta, metaPath: full });
-          }
-        } catch { /* skip */ }
-      } else {
-        try { if (readdirSync(full)) walk(full); } catch { /* not dir */ }
-      }
-    }
-  }
-
-  walk("approved");
-  return results;
+  return walkDesigns("approved", (m) => m.status === "approved");
 }
 
 interface DraftRecord {
@@ -75,8 +55,8 @@ interface DraftedMeta extends DesignMetadata {
 async function waitForMockups(
   shopId: string,
   productId: string,
-  timeoutMs = 60_000,
-  intervalMs = 3_000
+  timeoutMs = 150_000,
+  intervalMs = 5_000
 ): Promise<Awaited<ReturnType<typeof getProduct>>> {
   const deadline = Date.now() + timeoutMs;
   let last = await getProduct(shopId, productId);
@@ -155,6 +135,10 @@ function alreadyDraftedFor(meta: DesignMetadata, product: ProductType): boolean 
  * For t-shirts prefer the background-removed version; for mug/poster prefer
  * the resized/original with background.
  */
+// Cache upscaled source buffers within a run. Keyed by source path; cleared per design in
+// main() so memory stays bounded (a design has at most ~2 distinct sources across its targets).
+const upscaleCache = new Map<string, Buffer>();
+
 function resolveSourceImage(meta: DesignMetadata, targetProduct: ProductType): string {
   const candidates =
     targetProduct === "tshirt"
@@ -173,11 +157,29 @@ async function draftDesign(
   targetProduct: ProductType
 ): Promise<EtsyPackEntry | null> {
   const blueprint = BLUEPRINT_MAP[targetProduct];
-  const isPrimary = targetProduct === meta.product;
 
   const sourcePath = resolveSourceImage(meta, targetProduct);
-  const originalBuffer: Buffer = readFileSync(sourcePath);
-  let imageBuffer: Buffer = originalBuffer;
+  let imageBuffer: Buffer = readFileSync(sourcePath);
+
+  // Optional local AI upscale (real detail) — first, so bg-removal/resize operate on the
+  // high-res image. Cached per source path so a design's fan-out targets (tshirt/mug/poster)
+  // don't re-run the upscaler on the same image. Silent fallback when disabled/unavailable.
+  if (isUpscalerEnabled()) {
+    const cached = upscaleCache.get(sourcePath);
+    if (cached) {
+      imageBuffer = cached;
+      console.log("    Upscale reusado de cache ✓");
+    } else {
+      process.stdout.write(`    Upscaling locally (realesrgan ×${getConfig().upscaler.scale})... `);
+      try {
+        imageBuffer = await upscaleBuffer(imageBuffer);
+        upscaleCache.set(sourcePath, imageBuffer);
+        console.log("✓");
+      } catch (err) {
+        console.log(`SKIP (${err instanceof Error ? err.message : err})`);
+      }
+    }
+  }
 
   // For tshirt: ensure background is removed. We can't trust meta.files.noBg —
   // older approved designs were generated when bg-removal was disabled and the
@@ -188,14 +190,16 @@ async function draftDesign(
     console.log("✓");
   }
 
-  // For fan-out targets (and tshirts after bg-removal), resize to print dimensions.
-  if (!isPrimary || targetProduct === "tshirt") {
-    process.stdout.write(`    Resizing source for ${targetProduct}... `);
-    imageBuffer = await resizeForPrintify(imageBuffer, targetProduct);
-    console.log("✓");
-  }
+  // Always normalize to the product's print dimensions (crisply downscales an upscaled
+  // image; near-noop when the source is already at target size).
+  process.stdout.write(`    Resizing for ${targetProduct}... `);
+  imageBuffer = await resizeForPrintify(imageBuffer, targetProduct);
+  console.log("✓");
 
+  process.stdout.write("    Compressing for upload... ");
+  imageBuffer = await compressForUpload(imageBuffer);
   const base64 = imageBuffer.toString("base64");
+  console.log(`✓ (${(base64.length / 1024 / 1024).toFixed(1)}MB base64)`);
 
   process.stdout.write("    Uploading image to Printify... ");
   const uploaded = await uploadImageBase64(`${meta.id}-${targetProduct}.png`, base64);
@@ -238,14 +242,9 @@ async function draftDesign(
   });
   console.log(`✓ (${product.id})`);
 
-  // Select more mockups for publishing — Etsy ranks listings with 6+ images higher.
-  try {
-    process.stdout.write("    Selecting mockups for publish... ");
-    const selected = await selectDiverseMockups(shopId, product.id, 6);
-    console.log(`✓ (${selected} mockups)`);
-  } catch (err) {
-    console.log(`SKIP (${err instanceof Error ? err.message : err})`);
-  }
+  // Mockup selection is deferred to a SECOND pass after all products are created —
+  // Printify renders mockups asynchronously (often >1 min), so waiting inline here
+  // both stalled creation and fired a storm of polling GETs that returned 0 mockups.
 
   // Product stays as DRAFT in Printify — no auto-publish to Etsy.
   appendDraft(metaPath, meta, targetProduct, product.id);
@@ -297,6 +296,7 @@ async function main() {
 
   for (let i = 0; i < approved.length; i++) {
     const item = approved[i] as ApprovedDesign;
+    upscaleCache.clear(); // bound memory: only reuse within this design's fan-out targets
     const targets = targetsFor(item.meta);
     console.log(`\n  [${i + 1}/${approved.length}] ${item.meta.id} → ${targets.join(", ")}`);
 
@@ -326,6 +326,24 @@ async function main() {
         stats.failed++;
       }
     }
+  }
+
+  // ── Second pass: select mockups now that Printify has had time to render them ──
+  if (packEntries.length > 0) {
+    console.log("\n" + "─".repeat(60));
+    console.log(`\n🖼  Seleccionando mockups (${packEntries.length} productos, hasta 150s c/u si hace falta)...`);
+    let withMockups = 0;
+    for (const entry of packEntries) {
+      process.stdout.write(`  ${entry.printifyProductId} (${entry.product})... `);
+      try {
+        const n = await selectDiverseMockups(shop.id, entry.printifyProductId, 6);
+        if (n > 0) withMockups++;
+        console.log(`✓ ${n} mockups`);
+      } catch (err) {
+        console.log(`SKIP (${err instanceof Error ? err.message : err})`);
+      }
+    }
+    console.log(`  → ${withMockups}/${packEntries.length} con mockups seleccionados`);
   }
 
   console.log("\n" + "─".repeat(60));

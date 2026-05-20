@@ -25,9 +25,17 @@ import { discoverNiches } from "./research/discovery.js";
 import { askApproval } from "./lib/approval.js";
 import { analyzeNiche, rankNiches } from "./research/niche-analyzer.js";
 import { generateAllVariations } from "./generator/image-generator.js";
-import { postProcess } from "./generator/post-processor.js";
+import { postProcess, compressForUpload, resizeForPrintify } from "./generator/post-processor.js";
+import { isUpscalerEnabled, upscaleBuffer } from "./lib/upscaler.js";
 import { buildValidatorPrompt, normalizeValidation } from "./validator/criteria.js";
-import { persistApprovedOrBorderline, handleRejection } from "./validator/loop-control.js";
+import {
+  persistApprovedOrBorderline,
+  handleRejection,
+  promoteToApproved,
+  autoRegenerate,
+  markRejected,
+} from "./validator/loop-control.js";
+import { walkDesigns } from "./lib/design-store.js";
 import { analyzeImage } from "./lib/gemini.js";
 import { getShops, uploadImageBase64, createProduct } from "./lib/printify.js";
 import { generateSEO } from "./publisher/seo.js";
@@ -36,7 +44,7 @@ import { BLUEPRINT_MAP } from "./publisher/blueprint-map.js";
 import { writeEtsyPack, type EtsyPackEntry } from "./publisher/etsy-pack.js";
 import type { ProductType, DesignMetadata, NicheContext, ValidationResult } from "./generator/types.js";
 import type { NicheAnalysis, NicheData } from "./research/types.js";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const config = getConfig();
@@ -62,24 +70,7 @@ function waitForEnter(prompt: string): Promise<void> {
 }
 
 function findApprovedDesigns(): Array<{ meta: DesignMetadata; metaPath: string }> {
-  const results: Array<{ meta: DesignMetadata; metaPath: string }> = [];
-  function walk(dir: string) {
-    let entries: string[];
-    try { entries = readdirSync(dir); } catch { return; }
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      if (entry === "metadata.json") {
-        try {
-          const meta = JSON.parse(readFileSync(full, "utf-8")) as DesignMetadata;
-          if (meta.status === "approved") results.push({ meta, metaPath: full });
-        } catch { /* skip */ }
-      } else {
-        try { if (readdirSync(full)) walk(full); } catch { /* not dir */ }
-      }
-    }
-  }
-  walk("approved");
-  return results;
+  return walkDesigns("approved", (m) => m.status === "approved");
 }
 
 // ── Phase 0: Discovery (only when auto_discover=true) ─────────────────────────
@@ -241,17 +232,24 @@ async function runGeneration(niches: NicheAnalysis[]): Promise<DesignMetadata[]>
 // ── Phase 3: AI Validation ────────────────────────────────────────────────────
 
 async function runValidation(designs: DesignMetadata[]): Promise<{
-  passed: number;
+  autoApproved: number;
+  toReview: number;
   rejected: number;
-  forced: number;
   regenerated: number;
 }> {
-  console.log(`\n🧠 [3/6] Validación IA — ${designs.length} diseños [modelo=${config.validator.vision_model}]`);
+  const autoApprove = config.validator.auto_approve_passing;
+  const autoRegen = config.validator.auto_regenerate;
+  console.log(
+    `\n🧠 [3/6] Validación IA — ${designs.length} diseños [modelo=${config.validator.vision_model}, auto_approve=${autoApprove}, auto_regen=${autoRegen}]`
+  );
 
-  const stats = { passed: 0, rejected: 0, forced: 0, regenerated: 0 };
+  const stats = { autoApproved: 0, review: 0, rejected: 0, regenerated: 0 };
   const queue = designs.filter((d) => d.status === "pending-validation");
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  // readline only when a rejection could need the interactive menu (auto_regenerate off)
+  const rl = !autoRegen
+    ? readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
+    : null;
 
   while (queue.length > 0) {
     const meta = queue.shift() as DesignMetadata;
@@ -277,26 +275,56 @@ async function runValidation(designs: DesignMetadata[]): Promise<{
 
     console.log(`${verdict.verdict} (overall ${verdict.scores.overall.toFixed(1)}/10)`);
 
-    if (verdict.verdict === "approved" || verdict.verdict === "borderline") {
-      persistApprovedOrBorderline(meta, verdict);
-      stats.passed++;
+    // Approved + hybrid review → straight to approved/ (skip manual review)
+    if (verdict.verdict === "approved" && autoApprove) {
+      promoteToApproved(meta, verdict);
+      stats.autoApproved++;
       continue;
     }
-    // Rejected — interactive prompt
-    const action = await handleRejection(meta, verdict, rl);
-    if (action.kind === "regenerate") {
-      stats.regenerated++;
-      queue.push(action.newDesign);
-    } else if (action.kind === "force-approve") {
-      stats.forced++;
-    } else {
-      stats.rejected++;
+    // Approved without auto-approve, or borderline → pending-review (human gate)
+    if (verdict.verdict === "approved" || verdict.verdict === "borderline") {
+      persistApprovedOrBorderline(meta, verdict);
+      stats.review++;
+      continue;
     }
+    // Rejected
+    if (autoRegen) {
+      const newDesign = await autoRegenerate(meta, verdict);
+      if (newDesign) {
+        stats.regenerated++;
+        queue.push(newDesign);
+      } else {
+        markRejected(meta, verdict);
+        stats.rejected++;
+      }
+      continue;
+    }
+    if (rl) {
+      const action = await handleRejection(meta, verdict, rl);
+      if (action.kind === "regenerate") {
+        stats.regenerated++;
+        queue.push(action.newDesign);
+      } else if (action.kind === "force-approve") {
+        stats.review++;
+      } else {
+        stats.rejected++;
+      }
+      continue;
+    }
+    markRejected(meta, verdict);
+    stats.rejected++;
   }
 
-  rl.close();
-  console.log(`  ✅ pasan a review: ${stats.passed + stats.forced} | rechazados: ${stats.rejected} | regenerados: ${stats.regenerated}`);
-  return stats;
+  rl?.close();
+  console.log(
+    `  ✅ auto-aprobados: ${stats.autoApproved} | a review: ${stats.review} | rechazados: ${stats.rejected} | regenerados: ${stats.regenerated}`
+  );
+  return {
+    autoApproved: stats.autoApproved,
+    toReview: stats.review,
+    rejected: stats.rejected,
+    regenerated: stats.regenerated,
+  };
 }
 
 // ── Phase 4: Manual Pause ─────────────────────────────────────────────────────
@@ -343,7 +371,12 @@ async function runPublish(): Promise<number> {
       const imagePath = meta.product === "tshirt" && meta.files.noBg
         ? meta.files.noBg : meta.files.original;
 
-      const base64 = readFileSync(imagePath).toString("base64");
+      let imgBuf: Buffer = readFileSync(imagePath);
+      if (isUpscalerEnabled()) {
+        try { imgBuf = await upscaleBuffer(imgBuf); } catch { /* fallback to plain resize */ }
+      }
+      imgBuf = await resizeForPrintify(imgBuf, meta.product);
+      const base64 = (await compressForUpload(imgBuf)).toString("base64");
       const uploaded = await uploadImageBase64(`${meta.id}.png`, base64);
 
       const pricing = calculatePrice(meta.product, { marginPercent: config.publishing.margin_percent });
@@ -436,9 +469,16 @@ async function main() {
     stats.designsGenerated = designs.length;
 
     const valStats = await runValidation(designs);
-    const toReview = valStats.passed + valStats.forced;
 
-    await runPause(niches, toReview);
+    if (valStats.toReview > 0) {
+      // Only borderline / force-approved designs need human eyes now.
+      await runPause(niches, valStats.toReview);
+    } else {
+      console.log("\n⏭  [4/6] Sin diseños borderline — todo auto-aprobado, publicando directo");
+      if (valStats.autoApproved === 0) {
+        console.log("  ⚠️  Tampoco hubo auto-aprobados; revisa los rechazos arriba.");
+      }
+    }
 
     const published = await runPublish();
     stats.designsPublished = published;

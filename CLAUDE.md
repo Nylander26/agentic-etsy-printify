@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Automated pipeline (Node.js + TypeScript) that researches Etsy niches, generates POD designs via AI, and publishes to Etsy through Printify — with a mandatory manual validation step before publishing.
+Automated pipeline (Node.js + TypeScript) that researches Etsy niches, generates POD designs via AI, and publishes to Etsy through Printify. An AI vision validator scores each design; under the default **hybrid review**, designs that clear the approval threshold auto-promote to `approved/` while only borderline / force-approved designs require manual review before publishing.
 
 **Status:** Pre-development. Reference: `plan-agentico-etsy-v2.md` for full architecture and weekly roadmap.
 
@@ -40,20 +40,24 @@ Seven sequential modules, each independent and runnable standalone:
 src/research/discovery → Google Trends dailyTrends + Gemini POD filter + Apify cross-validation
 src/research/          → Per-keyword Trends + Apify + Gemini niche scoring
 src/generator/         → Prompt engineering + Nano Banana image gen + sharp post-processing
-src/validator/         → Gemini Vision agent (niche-aware rubric, market-fit checks, regenerate loop with hard cap)
-src/reviewer/          → CLI review UI (approve/reject) — shows validator scores when available
+src/validator/         → Gemini Vision agent (niche-aware rubric, market-fit checks, auto-regenerate loop with hard cap, hybrid auto-approve)
+src/reviewer/          → CLI review UI for borderline/force-approved only — batch [AA]/[RA] or per-design A/R/G/S ([G] regenerates via the SAME image model)
+src/lib/design-store   → shared design state helpers (walkDesigns / moveDesign / writeMeta) used by validator, reviewer, publisher, pipeline
 src/publisher/         → Printify upload + Gemini SEO metadata + Etsy pack JSON
 src/monitor/           → Etsy stats polling + feedback loop + weekly dashboard
 ```
 
 **Approval gates (CLI + optional Telegram in parallel via `src/lib/approval.ts`):**
 1. After discovery → user selects which discovered niches proceed to generation.
-2. After validator rejection → user picks regenerate/skip/force-approve per design.
+2. Manual review (`pnpm review`) → only borderline + force-approved designs reach it; supports batch approve-all `[AA]` / reject-all `[RA]` or per-design `A/R/G/S`. AI-approved designs skip this gate when `validator.auto_approve_passing=true`.
 
-**Pipeline state machine:**
-`pending-validation/` → validator IA →
-  ├─ approved/borderline → `pending-review/` → (manual A/R) → `approved/` or `rejected/` → publish
-  ├─ rejected → user prompt: regenerate (capped) | skip | force-approve
+**Pipeline state machine (hybrid review — `validator.auto_approve_passing` + `validator.auto_regenerate`):**
+`pending-validation/` → validator IA (Gemini Vision) →
+  ├─ approved (≥ approval_threshold) → `approved/` directly → publish              (auto_approve_passing=true)
+  ├─ borderline / force-approved     → `pending-review/` → (manual A/R/G) → `approved/`|`rejected/` → publish
+  └─ rejected → auto-regenerate (SAME image model + validator hints) → re-validate, capped at `max_regenerations`, else `rejected/`   (auto_regenerate=true)
+
+With `auto_approve_passing=false` every passing design goes through manual review; with `auto_regenerate=false` rejections fall back to the interactive regenerate/skip/force-approve menu. Regeneration always reuses the original image model (`generateDesign` → `generateImage` → `gemini.model_image`) — never a different/lower-quality API.
 
 Design output structure: `output/{date}/{niche}/{design-id}/` containing original image, background-removed image, and `metadata.json`. Regenerated designs get suffix `-r1`, `-r2`, etc. up to `validator.max_regenerations`.
 
@@ -73,7 +77,7 @@ Pipeline behavior controlled via `config.yaml`. Key sections:
 - `market`: country/currency/language/audience — propagated to Trends, Apify, and validator system prompt. Default: US.
 - `research`: seed keywords, niche scoring thresholds.
 - `generation`: designs per niche, products, style preference.
-- `validator`: `max_regenerations` (default 2), `approval_threshold` (6.5), `borderline_threshold` (5.0), `vision_model`, `enforce_market_fit`.
+- `validator`: `max_regenerations` (default 2), `approval_threshold` (6.5), `borderline_threshold` (5.0), `vision_model`, `enforce_market_fit`, `auto_approve_passing` (default true — AI-approved skip manual review), `auto_regenerate` (default true — rejected auto-regenerate up to the cap).
 - `publishing`: margin, max per run.
 
 API keys via `.env`:

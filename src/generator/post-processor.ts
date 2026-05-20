@@ -47,6 +47,12 @@ export async function removeBackground(inputBuffer: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
+// TODO (calidad — diferido, hablado con el usuario 2026-05-20):
+// Hoy se hace upscale de 1024×1024 → dimensiones Printify (p.ej. póster 4800×6000) con
+// interpolación de sharp. Eso NO agrega detalle real: agranda el raster nativo de Nano
+// Banana, así que en remera/póster grandes la nitidez efectiva sigue siendo la de 1024.
+// Pendiente: generar a mayor resolución de origen o pasar por un upscaler real
+// (Real-ESRGAN / API de upscaling) ANTES de redimensionar.
 // Upscale and fit to Printify target dimensions using sharp
 export async function resizeForPrintify(
   inputBuffer: Buffer,
@@ -65,6 +71,51 @@ export async function resizeForPrintify(
     })
     .png({ compressionLevel: 9 })
     .toBuffer();
+}
+
+/** base64 inflates a buffer by ~4/3 — estimate the encoded body size. */
+function base64Size(buf: Buffer): number {
+  return Math.ceil(buf.length / 3) * 4;
+}
+
+/**
+ * Prepares the upload payload, prioritising QUALITY: it first encodes a lossless,
+ * full-color PNG (max compression). Flat / vector art compresses well even losslessly,
+ * so most designs upload with zero quality loss. Only if the lossless PNG would still
+ * exceed Printify's POST body limit (HTTP 413) does it fall back to progressively
+ * stronger palette quantization (256 → 128 → 64 colors), logging a warning so it's
+ * clear which images were degraded. Resolution is never changed; transparency is kept.
+ *
+ * NOTE: the images that *force* quantization are exactly those bloated by the naive
+ * 1024→print upscale (see the TODO on `resizeForPrintify`). A real upscaler would let
+ * every design stay lossless here.
+ */
+export async function compressForUpload(
+  inputBuffer: Buffer,
+  maxBase64Bytes = getConfig().publishing.max_upload_mb * 1_000_000
+): Promise<Buffer> {
+  const mb = (b: Buffer) => (base64Size(b) / 1_000_000).toFixed(1);
+  const limitMb = (maxBase64Bytes / 1_000_000).toFixed(1);
+
+  // Already within Printify's POST limit → upload the bytes AS-IS. The input is already a
+  // compressionLevel-9 PNG (from resizeForPrintify); re-encoding it again is redundant AND
+  // altered transparent t-shirt PNGs enough that Printify's DTG rejected them with HTTP 500.
+  if (base64Size(inputBuffer) <= maxBase64Bytes) return inputBuffer;
+
+  // Too big for the base64 body → quantize the palette progressively until it fits.
+  const losslessMb = mb(inputBuffer);
+  let best = inputBuffer;
+  for (const colors of [256, 128, 64]) {
+    best = await sharp(inputBuffer)
+      .png({ palette: true, colors, dither: 1.0, compressionLevel: 9, effort: 10 })
+      .toBuffer();
+    if (base64Size(best) <= maxBase64Bytes) {
+      console.log(`      ⚠️  lossless ${losslessMb}MB > ${limitMb}MB límite — cuantizada a ${colors} colores (${mb(best)}MB)`);
+      return best;
+    }
+  }
+  console.log(`      ⚠️  lossless ${losslessMb}MB — cuantizada al máximo (64 colores, ${mb(best)}MB), aún cerca del límite`);
+  return best;
 }
 
 function validateResolution(buffer: Buffer, product: ProductType): void {

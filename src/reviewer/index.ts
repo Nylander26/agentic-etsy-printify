@@ -1,49 +1,46 @@
 /**
- * Semana 4 — revisor de diseños.
+ * Semana 4 — revisor de diseños (con acciones en lote).
  * Uso: pnpm review
- * Muestra cada diseño pending-review y espera input: [A]probar / [R]echazar / Re[G]enerar / [S]altar
+ *
+ * Solo muestra diseños en `pending-review`. Con el flujo híbrido eso es
+ * borderline + force-approved — los que el validador aprobó con holgura ya
+ * fueron movidos a approved/ automáticamente.
+ *
+ * Acciones:
+ *   - En lote: [AA] aprobar TODO · [RA] rechazar TODO
+ *   - Uno a uno: [A]probar · [R]echazar · [G] regenerar (mismo modelo) · [S]altar
  */
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, cpSync, rmSync } from "fs";
-import { join, dirname, basename } from "path";
 import * as readline from "readline";
+import { walkDesigns, moveDesign } from "../lib/design-store.js";
+import { autoRegenerate } from "../validator/loop-control.js";
 import type { DesignMetadata } from "../generator/types.js";
 
 // ── Find all pending-review designs ──────────────────────────────────────────
 
 function findPendingDesigns(): DesignMetadata[] {
-  const results: DesignMetadata[] = [];
-
-  function walk(dir: string) {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      if (entry === "metadata.json") {
-        try {
-          const meta = JSON.parse(readFileSync(full, "utf-8")) as DesignMetadata;
-          if (meta.status === "pending-review") results.push(meta);
-        } catch {
-          // skip malformed
-        }
-      } else {
-        try {
-          if (readdirSync(full)) walk(full);
-        } catch {
-          // not a directory
-        }
-      }
-    }
-  }
-
-  walk("output");
-  return results;
+  return walkDesigns("output", (m) => m.status === "pending-review").map((f) => f.meta);
 }
 
-// ── Display design info ───────────────────────────────────────────────────────
+// ── Display helpers ───────────────────────────────────────────────────────────
+
+function scoreLabel(meta: DesignMetadata): string {
+  if (!meta.validation) return "sin score IA";
+  const v = meta.validation;
+  const badge = meta.forceApproved ? " ⚡FORCE" : "";
+  return `${v.verdict} ${v.scores.overall.toFixed(1)}/10${badge}`;
+}
+
+function printList(pending: DesignMetadata[]): void {
+  const divider = "─".repeat(60);
+  console.log(`\n${divider}`);
+  console.log(`  ${pending.length} diseños en pending-review:`);
+  pending.forEach((m, i) => {
+    console.log(
+      `   ${String(i + 1).padStart(2)}. ${m.id}  [${m.product}/${m.variation}]  ${scoreLabel(m)}`
+    );
+  });
+  console.log(divider);
+}
 
 function displayDesign(meta: DesignMetadata, index: number, total: number) {
   const divider = "─".repeat(60);
@@ -72,39 +69,14 @@ function displayDesign(meta: DesignMetadata, index: number, total: number) {
     }
   }
   console.log(divider);
-  console.log("  [A] Aprobar   [R] Rechazar   [G] Regenerar   [S] Saltar");
-  process.stdout.write("  Opción: ");
-}
-
-// ── Move design to approved/ or rejected/ ────────────────────────────────────
-
-function moveDesign(meta: DesignMetadata, dest: "approved" | "rejected"): DesignMetadata {
-  const srcDir = dirname(meta.files.original);
-  const destDir = join(dest, meta.id);
-
-  mkdirSync(destDir, { recursive: true });
-  cpSync(srcDir, destDir, { recursive: true });
-  rmSync(srcDir, { recursive: true, force: true });
-
-  const updatedFiles: DesignMetadata["files"] = {
-    original: join(destDir, basename(meta.files.original)),
-    ...(meta.files.noBg ? { noBg: join(destDir, basename(meta.files.noBg)) } : {}),
-  };
-
-  const updatedMeta: DesignMetadata = {
-    ...meta,
-    status: dest === "approved" ? "approved" : "rejected",
-    files: updatedFiles,
-  };
-
-  writeFileSync(join(destDir, "metadata.json"), JSON.stringify(updatedMeta, null, 2));
-  return updatedMeta;
+  console.log("  [A] Aprobar   [R] Rechazar   [G] Regenerar (mismo modelo)   [S] Saltar");
 }
 
 // ── Readline prompt ───────────────────────────────────────────────────────────
 
-function prompt(rl: readline.Interface): Promise<string> {
+function prompt(rl: readline.Interface, msg = ""): Promise<string> {
   return new Promise((resolve) => {
+    if (msg) process.stdout.write(msg);
     rl.once("line", (line) => resolve(line.trim().toLowerCase()));
   });
 }
@@ -116,12 +88,13 @@ async function main() {
 
   if (pending.length === 0) {
     console.log("\n✅ No hay diseños pendientes de revisión.\n");
-    console.log("   Genera diseños primero: pnpm generate --niche \"...\"\n");
+    console.log("   (Con auto_approve_passing=true, los aprobados por la IA ya están en approved/.)\n");
     process.exit(0);
   }
 
   console.log(`\n🎨 Revisión de diseños — ${pending.length} pendientes`);
-  console.log("   Abre los archivos PNG en tu explorador de archivos mientras revisas.\n");
+  console.log("   Abre los archivos PNG en tu explorador mientras revisas.");
+  printList(pending);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -129,64 +102,94 @@ async function main() {
     terminal: false,
   });
 
-  const stats = { approved: 0, rejected: 0, skipped: 0, toRegenerate: [] as string[] };
+  const stats = { approved: 0, rejected: 0, skipped: 0, regenerated: 0 };
 
-  for (let i = 0; i < pending.length; i++) {
-    const meta = pending[i] as DesignMetadata;
-    displayDesign(meta, i + 1, pending.length);
+  // ── Top-level batch decision ────────────────────────────────────────────────
+  console.log(
+    "\n  Acción en lote: [AA] aprobar TODO · [RA] rechazar TODO · [Enter] revisar uno por uno"
+  );
+  const top = await prompt(rl, "  Opción: ");
 
-    let handled = false;
-    while (!handled) {
-      const input = await prompt(rl);
+  if (top === "aa") {
+    for (const meta of pending) {
+      moveDesign(meta, "approved");
+      stats.approved++;
+    }
+    console.log(`  ✅ ${stats.approved} diseños aprobados en lote.`);
+  } else if (top === "ra") {
+    for (const meta of pending) {
+      moveDesign(meta, "rejected");
+      stats.rejected++;
+    }
+    console.log(`  ❌ ${stats.rejected} diseños rechazados en lote.`);
+  } else {
+    // ── One-by-one ──────────────────────────────────────────────────────────
+    for (let i = 0; i < pending.length; i++) {
+      const meta = pending[i] as DesignMetadata;
+      displayDesign(meta, i + 1, pending.length);
 
-      switch (input) {
-        case "a":
-          moveDesign(meta, "approved");
-          stats.approved++;
-          console.log("  ✅ Aprobado");
-          handled = true;
-          break;
+      let handled = false;
+      while (!handled) {
+        const input = await prompt(rl, "  Opción [A/R/G/S]: ");
 
-        case "r":
-          moveDesign(meta, "rejected");
-          stats.rejected++;
-          console.log("  ❌ Rechazado");
-          handled = true;
-          break;
+        switch (input) {
+          case "a":
+            moveDesign(meta, "approved");
+            stats.approved++;
+            console.log("  ✅ Aprobado");
+            handled = true;
+            break;
 
-        case "g":
-          // Mark for regeneration — keep as pending, log concept
-          stats.toRegenerate.push(`${meta.niche} / ${meta.concept} (${meta.product})`);
-          console.log("  🔄 Marcado para regenerar — se mantendrá como pending-review");
-          handled = true;
-          break;
+          case "r":
+            moveDesign(meta, "rejected");
+            stats.rejected++;
+            console.log("  ❌ Rechazado");
+            handled = true;
+            break;
 
-        case "s":
-          stats.skipped++;
-          console.log("  ⏭  Saltado");
-          handled = true;
-          break;
+          case "g": {
+            // Same image model + the validator's suggestedImprovements
+            // (autoRegenerate → regenerate → generateDesign → generateImage).
+            if (!meta.validation) {
+              console.log("  ⚠️  Sin datos del validador para regenerar — usa A/R/S.");
+              break;
+            }
+            console.log("  🔄 Regenerando (mismo modelo de imagen + sugerencias del validador)...");
+            const newDesign = await autoRegenerate(meta, meta.validation);
+            if (newDesign) {
+              console.log(`  ✓ Nuevo diseño ${newDesign.id} en pending-validation — corré 'pnpm validate'.`);
+              stats.regenerated++;
+              handled = true;
+            } else {
+              console.log("  ⚠️  Cap de regeneraciones alcanzado — usa A/R/S.");
+            }
+            break;
+          }
 
-        default:
-          process.stdout.write("  Opción inválida. [A/R/G/S]: ");
+          case "s":
+            stats.skipped++;
+            console.log("  ⏭  Saltado");
+            handled = true;
+            break;
+
+          default:
+            console.log("  Opción inválida.");
+        }
       }
     }
   }
 
   rl.close();
 
-  // Summary
+  // ── Summary ──────────────────────────────────────────────────────────────────
   const divider = "─".repeat(60);
   console.log(`\n${divider}`);
   console.log("  Resumen de revisión:");
   console.log(`  ✅ Aprobados:   ${stats.approved}`);
   console.log(`  ❌ Rechazados:  ${stats.rejected}`);
-  console.log(`  ⏭  Saltados:    ${stats.skipped}`);
-  console.log(`  🔄 Regenerar:   ${stats.toRegenerate.length}`);
-
-  if (stats.toRegenerate.length > 0) {
-    console.log("\n  Para regenerar:");
-    stats.toRegenerate.forEach((r) => console.log(`    • ${r}`));
+  if (stats.skipped > 0) console.log(`  ⏭  Saltados:    ${stats.skipped}`);
+  if (stats.regenerated > 0) {
+    console.log(`  🔄 Regenerados: ${stats.regenerated} (en pending-validation — corré pnpm validate)`);
   }
 
   if (stats.approved > 0) {

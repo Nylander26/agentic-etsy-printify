@@ -68,5 +68,6 @@ export const PRINTIFY_DIMENSIONS: Record<ProductType, { width: number; height: n
   poster: { width: 4800, height: 6000 },  // 16×20 equivalent
 };
 
-// Gemini generates 1024×1024 — we upscale with sharp
+// Native Gemini output size now depends on gemini.image_size (1K=1024 … 4K=4096).
+// Reference constant for the legacy 1K baseline.
 export const GEMINI_OUTPUT_SIZE = 1024;

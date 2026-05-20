@@ -144,14 +144,26 @@ export interface GeneratedImage {
   model: string;
 }
 
-// responseModalities is not yet in the SDK GenerationConfig types
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const imageGenConfig: any = { responseModalities: ["IMAGE"] };
+export interface ImageGenOptions {
+  // Gemini imageConfig.aspectRatio, e.g. "1:1", "4:5", "21:9". Sets the NATIVE shape so the
+  // print resize doesn't pad (mug = wide, poster = portrait). Omitted → model default (square).
+  aspectRatio?: string;
+  // Override the configured native resolution ("512" | "1K" | "2K" | "4K").
+  imageSize?: string;
+}
 
-function imageRequest(prompt: string) {
+// responseModalities + imageConfig are not yet in the SDK GenerationConfig types.
+// imageConfig.imageSize controls native output resolution (Nano Banana 2: 512/1K/2K/4K) —
+// real detail from the model, not interpolation; aspectRatio sets the native shape.
+function imageRequest(prompt: string, opts?: ImageGenOptions) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imageConfig: any = { imageSize: opts?.imageSize ?? cfg.gemini.image_size };
+  if (opts?.aspectRatio) imageConfig.aspectRatio = opts.aspectRatio;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const generationConfig: any = { responseModalities: ["IMAGE"], imageConfig };
   return {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: imageGenConfig,
+    generationConfig,
   };
 }
 
@@ -165,9 +177,12 @@ function extractImage(result: GenerateContentResult, model: string): GeneratedIm
   return null;
 }
 
-export async function generateImage(prompt: string): Promise<GeneratedImage> {
+export async function generateImage(
+  prompt: string,
+  opts?: ImageGenOptions
+): Promise<GeneratedImage> {
   await waitForImageSlot();
-  const result = await imageModel.generateContent(imageRequest(prompt));
+  const result = await imageModel.generateContent(imageRequest(prompt, opts));
   const img = extractImage(result, cfg.gemini.model_image);
   if (img) return img;
   throw new Error("No image returned (model returned text-only response)");

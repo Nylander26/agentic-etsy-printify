@@ -57,10 +57,23 @@ validator:
   borderline_threshold: 5.0    # between this and approval → borderline (still pending-review)
   vision_model: "gemini-2.5-flash"  # multimodal model for image evaluation
   enforce_market_fit: true     # cultural fit with `market.audience` is a hard requirement
+  # Hybrid review: designs the AI scores >= approval_threshold skip the manual
+  # review queue and go straight to approved/ (ready to publish). Only borderline
+  # and force-approved designs land in pending-review for human eyes. Set false to
+  # send every passing design through manual review (the old, redundant behavior).
+  auto_approve_passing: true
+  # When the AI rejects a design, regenerate it automatically using the SAME image
+  # model + the validator's suggestedImprovements, up to max_regenerations — no
+  # per-design prompt. Set false to get the interactive [R]egenerate/[S]kip/[F]orce menu.
+  auto_regenerate: true
 
 publishing:
   margin_percent: 50
   max_publish_per_run: 25
+  # Límite de subida base64 a Printify (MB). Por encima, la imagen se cuantiza (lossy) para
+  # entrar. El límite real del body de Printify ronda 10MB. Subilo si ves cuantización
+  # innecesaria; bajalo si ves HTTP 413. El upscaler local elimina la necesidad de cuantizar.
+  max_upload_mb: 90
   # Auto-publish each approved design on these extra product types too
   # (the source image is resized to each target's print dimensions on the fly).
   fan_out_products:
@@ -71,7 +84,21 @@ publishing:
 gemini:
   model_text: "gemini-2.5-flash"
   model_image: "gemini-3.1-flash-image-preview"
+  # Native output resolution. Nano Banana 2 (gemini-3.1-flash-image-preview) supports
+  # "512" / "1K" / "2K" / "4K" via generationConfig.imageConfig.imageSize.
+  # 2K = 2048px (real detail, no interpolation); 4K = 4096px (más tokens/imagen + más lento).
+  image_size: "2K"
   max_image_requests_per_minute: 8
+
+# Optional LOCAL AI upscaler (real detail, no API cost, nothing leaves your machine).
+# Uses the standalone realesrgan-ncnn-vulkan binary — NO Docker / Python needed.
+# Download the Windows build, unzip, set enabled:true, and put the .exe path in .env as
+# UPSCALER_BINARY_PATH (kept out of git). Leave binary_path empty here.
+upscaler:
+  enabled: false
+  binary_path: ""                  # leave empty — set UPSCALER_BINARY_PATH in .env instead
+  model: "realesrgan-x4plus"       # general; "realesr-animevideov3" rinde mejor en line-art
+  scale: 4                         # x4plus upscalea ×4 (2048 → 8192), luego sharp baja al tamaño de impresión
 
 pipeline:
   notify_telegram: true

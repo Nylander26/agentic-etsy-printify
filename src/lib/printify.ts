@@ -1,7 +1,27 @@
-import axios, { type AxiosInstance } from "axios";
+import axios, {
+  type AxiosInstance,
+  type AxiosError,
+  type InternalAxiosRequestConfig,
+} from "axios";
+import { Agent as HttpsAgent } from "node:https";
+import { EventEmitter } from "node:events";
 import { env } from "./env.js";
 
 const BASE_URL = "https://api.printify.com/v1";
+
+// Keep-alive agent: reuse TLS connections instead of a fresh handshake per request.
+// Fewer handshakes = far less connection churn — the churn was what triggered the
+// intermittent `SSL alert ... bad record mac` failures during the publish burst.
+const keepAliveAgent = new HttpsAgent({
+  keepAlive: true,
+  maxSockets: 8,
+  maxFreeSockets: 4,
+});
+
+// Axios (via follow-redirects) attaches several listeners per request to the pooled
+// TLSSocket; across hundreds of sequential calls that trips Node's default cap of 10
+// ("MaxListenersExceededWarning"). Raise the ceiling — it's a pooled, reused socket.
+EventEmitter.defaultMaxListeners = 32;
 
 const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -9,6 +29,33 @@ const http: AxiosInstance = axios.create({
     Authorization: `Bearer ${env.PRINTIFY_API_TOKEN}`,
     "Content-Type": "application/json",
   },
+  httpsAgent: keepAliveAgent,
+  maxRedirects: 0, // Printify's REST API never redirects
+});
+
+// Retry transient failures (network/TLS errors with no HTTP response, plus 429/502/503/504)
+// with exponential backoff. Deterministic client errors like 413 are NOT retried.
+const MAX_RETRIES = 3;
+
+type RetryConfig = InternalAxiosRequestConfig & { __retryCount?: number };
+
+function isTransient(error: AxiosError): boolean {
+  const status = error.response?.status;
+  // No response → failure at the network/TLS layer (ECONNRESET, EPROTO, bad record mac, socket hang up)
+  if (status === undefined) return true;
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+http.interceptors.response.use(undefined, async (error: AxiosError) => {
+  const cfg = error.config as RetryConfig | undefined;
+  if (!cfg || !isTransient(error)) return Promise.reject(error);
+
+  cfg.__retryCount = (cfg.__retryCount ?? 0) + 1;
+  if (cfg.__retryCount > MAX_RETRIES) return Promise.reject(error);
+
+  const backoffMs = 500 * 2 ** (cfg.__retryCount - 1) + Math.floor(Math.random() * 250);
+  await new Promise((r) => setTimeout(r, backoffMs));
+  return http(cfg);
 });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
