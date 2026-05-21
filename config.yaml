@@ -50,6 +50,10 @@ generation:
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
   style_preference: "minimalist, clean vector"
   remove_background: true    # sharp color-key (Windows-safe). Designs must keep a clean white backdrop.
+  # T-shirts: also generate a dedicated, smaller BACK design (complementary logo/tagline) and
+  # print it on the garment back. +1 Gemini image call per tshirt design. The publisher places
+  # front + back print areas on a single product.
+  tshirt_back_design: true
 
 validator:
   max_regenerations: 2         # hard cap on auto-regenerations per design (prevents infinite loops)
@@ -80,6 +84,18 @@ publishing:
     - tshirt
     - mug
     - poster
+  # Etsy personalization. Designs that are personalizable (explicit `personalizable:true`
+  # in metadata, or — when auto_detect — inferred from concept/title keywords) are drafted
+  # with Etsy's "Personalize" option ON via sales_channel_properties.personalisation, so
+  # buyers can submit custom text. Without this, custom-text designs publish unsellable.
+  personalization:
+    enabled: true
+    instructions: "Add the exact name/text you want printed. Message us for special requests."
+    buyer_response_limit: 50   # Etsy max chars a buyer can submit (1-1024)
+    auto_detect: true          # infer personalizable from concept/title when no explicit flag
+  # Selling US-only → use Printify's economy (cheapest) shipping whenever the product is
+  # eligible. Enabled per draft right after creation.
+  prefer_economy_shipping: true
 
 gemini:
   model_text: "gemini-2.5-flash"

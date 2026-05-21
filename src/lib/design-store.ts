@@ -84,6 +84,8 @@ export function moveDesign(
   const updatedFiles: DesignMetadata["files"] = {
     original: join(destDir, basename(meta.files.original)),
     ...(meta.files.noBg ? { noBg: join(destDir, basename(meta.files.noBg)) } : {}),
+    ...(meta.files.back ? { back: join(destDir, basename(meta.files.back)) } : {}),
+    ...(meta.files.backNoBg ? { backNoBg: join(destDir, basename(meta.files.backNoBg)) } : {}),
   };
 
   const updatedMeta: DesignMetadata = {

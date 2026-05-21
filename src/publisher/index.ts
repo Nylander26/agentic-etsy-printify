@@ -18,7 +18,12 @@ import {
   createProduct,
   getProduct,
   updateMockupSelection,
+  disableUnavailableVariants,
+  deleteProduct,
+  setPersonalization,
+  enableEconomyShipping,
 } from "../lib/printify.js";
+import { isDrafted, recordDraft } from "../lib/draft-index.js";
 import { generateSEO } from "./seo.js";
 import { calculatePrice } from "./pricing.js";
 import { BLUEPRINT_MAP } from "./blueprint-map.js";
@@ -139,6 +144,29 @@ function alreadyDraftedFor(meta: DesignMetadata, product: ProductType): boolean 
 // main() so memory stays bounded (a design has at most ~2 distinct sources across its targets).
 const upscaleCache = new Map<string, Buffer>();
 
+// Provider stock is per blueprint+provider, identical across all products that share them.
+// Cache the available variant ids the first time we reconcile one, so subsequent drafts
+// pre-filter their variant payload without re-creating-then-disabling. Persists across the
+// whole run (NOT cleared per design — availability doesn't change between designs).
+const availableVariantsCache = new Map<string, Set<number>>();
+// Economy-shipping eligibility is also per blueprint+provider — learned on the first reconcile.
+const economyEligibleCache = new Map<string, boolean>();
+const bpKey = (blueprintId: number, providerId: number) => `${blueprintId}:${providerId}`;
+
+// Concept/title cues that imply a buyer-customizable (personalized) design.
+const PERSONALIZATION_CUES =
+  /personali[sz]|custom(?:ize|ise|ized|ised)?\b|custom name|add (?:your )?name|your name|monogram|name & number|name and number/i;
+
+/** Whether to enable Etsy's "Personalize" option for this design. */
+function isPersonalizable(meta: DesignMetadata, seoTitle: string): boolean {
+  const cfg = getConfig().publishing.personalization;
+  if (!cfg.enabled) return false;
+  if (meta.personalizable === true) return true;       // explicit metadata flag wins
+  if (meta.personalizable === false) return false;
+  if (!cfg.auto_detect) return false;
+  return PERSONALIZATION_CUES.test(`${meta.concept} ${meta.niche} ${seoTitle}`);
+}
+
 function resolveSourceImage(meta: DesignMetadata, targetProduct: ProductType): string {
   const candidates =
     targetProduct === "tshirt"
@@ -214,6 +242,48 @@ async function draftDesign(
   const seo = await generateSEO(seoMeta, [], pricing.suggestedPrice);
   console.log(`✓ "${seo.title.slice(0, 60)}..."`);
 
+  // Print placeholders — front always; add a back placeholder when this is a tshirt with a
+  // dedicated back artwork (#5). Both placeholders share the same variant_ids → one product.
+  const placeholders: Array<{
+    position: string;
+    images: Array<{ id: string; x: number; y: number; scale: number; angle: number }>;
+  }> = [
+    { position: blueprint.printPosition, images: [{ id: uploaded.id, x: 0.5, y: 0.5, scale: 1, angle: 0 }] },
+  ];
+
+  if (targetProduct === "tshirt" && blueprint.backPosition && meta.files.back && existsSync(meta.files.back)) {
+    process.stdout.write("    Processing back artwork... ");
+    let backBuffer: Buffer = readFileSync(meta.files.back);
+    backBuffer = await removeBackground(backBuffer);
+    backBuffer = await resizeForPrintify(backBuffer, targetProduct);
+    backBuffer = await compressForUpload(backBuffer);
+    const backUploaded = await uploadImageBase64(
+      `${meta.id}-${targetProduct}-back.png`,
+      backBuffer.toString("base64")
+    );
+    console.log(`✓ back (${backUploaded.id})`);
+    placeholders.push({
+      position: blueprint.backPosition,
+      images: [{ id: backUploaded.id, x: 0.5, y: 0.5, scale: 1, angle: 0 }],
+    });
+  }
+
+  // Stock pre-filter: if we already learned this blueprint+provider's availability this run,
+  // only enable variants the provider actually stocks. Avoids drafting unsellable variants.
+  const key = bpKey(blueprint.blueprintId, blueprint.printProviderId);
+  const knownAvailable = availableVariantsCache.get(key);
+  const intendedVariants = knownAvailable
+    ? blueprint.defaultVariants.filter((v) => knownAvailable.has(v.id))
+    : blueprint.defaultVariants;
+
+  if (knownAvailable && intendedVariants.length === 0) {
+    console.log(`    ⚠️  ${targetProduct}: ninguna variante con stock en provider ${blueprint.printProviderId} — skip`);
+    return null;
+  }
+  if (knownAvailable && intendedVariants.length < blueprint.defaultVariants.length) {
+    console.log(`    (stock) ${intendedVariants.length}/${blueprint.defaultVariants.length} variantes disponibles`);
+  }
+
   process.stdout.write("    Creating Printify DRAFT... ");
   const product = await createProduct({
     shopId,
@@ -221,33 +291,80 @@ async function draftDesign(
     description: seo.description,
     blueprintId: blueprint.blueprintId,
     printProviderId: blueprint.printProviderId,
-    variants: blueprint.defaultVariants.map((v) => ({
+    variants: intendedVariants.map((v) => ({
       id: v.id,
       price: priceInCents,
       is_enabled: true,
     })),
     printAreas: [
       {
-        variant_ids: blueprint.defaultVariants.map((v) => v.id),
-        placeholders: [
-          {
-            position: blueprint.printPosition,
-            images: [
-              { id: uploaded.id, x: 0.5, y: 0.5, scale: 1, angle: 0 },
-            ],
-          },
-        ],
+        variant_ids: intendedVariants.map((v) => v.id),
+        placeholders,
       },
     ],
   });
   console.log(`✓ (${product.id})`);
 
+  // Stock reconcile (first product of this blueprint+provider this run): Printify only
+  // exposes provider stock via the product's variants. Disable any out-of-stock variant
+  // and learn the available set for the rest of the run. If nothing sellable remains,
+  // delete the draft instead of leaving a product nobody can buy.
+  if (!knownAvailable) {
+    process.stdout.write("    Checking variant stock... ");
+    const { available, disabled, economyEligible } = await disableUnavailableVariants(shopId, product.id);
+    availableVariantsCache.set(key, available);
+    economyEligibleCache.set(key, economyEligible);
+    const sellable = intendedVariants.filter((v) => available.has(v.id));
+    if (sellable.length === 0) {
+      console.log("✗ sin stock — borrando draft");
+      await deleteProduct(shopId, product.id);
+      return null;
+    }
+    console.log(
+      disabled.length > 0
+        ? `✓ ${sellable.length}/${intendedVariants.length} con stock (${disabled.length} deshabilitadas)`
+        : "✓ todas con stock"
+    );
+  }
+
+  // Cheapest shipping (US-only store): enable Printify economy shipping when eligible.
+  if (getConfig().publishing.prefer_economy_shipping && economyEligibleCache.get(key)) {
+    process.stdout.write("    Enabling economy shipping... ");
+    try {
+      await enableEconomyShipping(shopId, product.id);
+      console.log("✓");
+    } catch (err) {
+      console.log(`SKIP (${err instanceof Error ? err.message : err})`);
+    }
+  }
+
   // Mockup selection is deferred to a SECOND pass after all products are created —
   // Printify renders mockups asynchronously (often >1 min), so waiting inline here
   // both stalled creation and fired a storm of polling GETs that returned 0 mockups.
 
+  // Enable Etsy "Personalize" for custom-text designs so buyers can submit their text.
+  if (isPersonalizable(meta, seo.title)) {
+    process.stdout.write("    Enabling personalization... ");
+    const pcfg = getConfig().publishing.personalization;
+    try {
+      await setPersonalization(shopId, product.id, {
+        instructions: pcfg.instructions,
+        buyerResponseLimit: pcfg.buyer_response_limit,
+      });
+      console.log("✓");
+    } catch (err) {
+      console.log(`SKIP (${err instanceof Error ? err.message : err})`);
+    }
+  }
+
   // Product stays as DRAFT in Printify — no auto-publish to Etsy.
   appendDraft(metaPath, meta, targetProduct, product.id);
+  recordDraft({
+    designId: meta.id,
+    product: targetProduct,
+    printifyProductId: product.id,
+    title: seo.title,
+  });
 
   return {
     designId: meta.id,
@@ -282,9 +399,23 @@ async function main() {
   }
 
   const fanOut = getConfig().publishing.fan_out_products ?? [];
+  // A design's artwork is composed for ONE layout: mugs are wide seamless wrap-arounds
+  // (art bleeds to the edges); t-shirts/posters are centered/portrait. Reusing a mug
+  // wrap on a t-shirt prints cut-off/wrong (the "Grillfather" bug). Only fan a design
+  // out to products in its own composition family; cross-family needs its own artwork.
+  const COMPOSITION_FAMILY: Record<ProductType, "centered" | "wrap"> = {
+    tshirt: "centered",
+    poster: "centered",
+    mug: "wrap",
+  };
   const targetsFor = (meta: DesignMetadata): ProductType[] => {
-    const set = new Set<ProductType>([meta.product, ...fanOut]);
-    return [...set];
+    const family = COMPOSITION_FAMILY[meta.product];
+    const compatible = fanOut.filter((p) => COMPOSITION_FAMILY[p] === family);
+    return [...new Set<ProductType>([meta.product, ...compatible])];
+  };
+  const incompatibleFanOut = (meta: DesignMetadata): ProductType[] => {
+    const family = COMPOSITION_FAMILY[meta.product];
+    return fanOut.filter((p) => COMPOSITION_FAMILY[p] !== family && p !== meta.product);
   };
 
   const totalDrafts = approved.reduce((acc, a) => acc + targetsFor(a.meta).length, 0);
@@ -299,10 +430,16 @@ async function main() {
     upscaleCache.clear(); // bound memory: only reuse within this design's fan-out targets
     const targets = targetsFor(item.meta);
     console.log(`\n  [${i + 1}/${approved.length}] ${item.meta.id} → ${targets.join(", ")}`);
+    const skippedTargets = incompatibleFanOut(item.meta);
+    if (skippedTargets.length > 0) {
+      console.log(`    (fan-out) omito ${skippedTargets.join(", ")} — arte ${item.meta.product} (composición incompatible)`);
+    }
 
     for (const targetProduct of targets) {
-      if (alreadyDraftedFor(item.meta, targetProduct)) {
-        console.log(`    · ${targetProduct}: already drafted — skip`);
+      const priorDraft = isDrafted(item.meta.id, targetProduct);
+      if (alreadyDraftedFor(item.meta, targetProduct) || priorDraft) {
+        const where = priorDraft ? ` (índice: ${priorDraft.printifyProductId})` : "";
+        console.log(`    · ${targetProduct}: already drafted — skip${where}`);
         stats.skipped++;
         continue;
       }

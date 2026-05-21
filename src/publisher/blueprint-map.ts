@@ -17,6 +17,8 @@ export interface BlueprintConfig {
   defaultVariants: Array<{ id: number; price: number }>;
   // Print area position name used in this blueprint
   printPosition: string;
+  // Optional secondary print position (e.g. garment back) for designs that ship a back artwork
+  backPosition?: string;
 }
 
 export const BLUEPRINT_MAP: Record<ProductType, BlueprintConfig> = {
@@ -47,6 +49,7 @@ export const BLUEPRINT_MAP: Record<ProductType, BlueprintConfig> = {
       { id: 17566, price: 0 },  // 2XL
     ],
     printPosition: "front",
+    backPosition: "back",
   },
   mug: {
     // Blueprint 68 = Mug 11oz — SPOKE Custom Products (only provider available)

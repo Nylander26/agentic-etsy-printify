@@ -192,8 +192,22 @@ export interface ProductMockup {
   is_selected_for_publishing: boolean;
 }
 
+export interface ProductVariant {
+  id: number;
+  price: number;
+  cost: number;
+  title: string;
+  is_enabled: boolean;
+  is_default: boolean;
+  is_available: boolean; // provider stock signal (only present on product variants, not catalog)
+  options: number[];
+}
+
 export interface FullProduct extends PrintifyProduct {
   images: ProductMockup[];
+  variants: ProductVariant[];
+  is_economy_shipping_eligible?: boolean;
+  is_economy_shipping_enabled?: boolean;
 }
 
 export async function getProduct(shopId: string, productId: string): Promise<FullProduct> {
@@ -219,6 +233,73 @@ export async function updateMockupSelection(
   }));
 
   await http.put(`/shops/${shopId}/products/${productId}.json`, { images });
+}
+
+/**
+ * Disables (is_enabled=false) any currently-enabled variant the print provider has no
+ * stock for (is_available=false). Partial PUT — only touches the variants array.
+ * Returns the set of ALL available variant ids for this product's blueprint+provider
+ * (cacheable across products that share the same blueprint+provider) and the ids disabled.
+ */
+export async function disableUnavailableVariants(
+  shopId: string,
+  productId: string
+): Promise<{ available: Set<number>; disabled: number[]; economyEligible: boolean }> {
+  const product = await getProduct(shopId, productId);
+  const available = new Set<number>();
+  const disabled: number[] = [];
+
+  for (const v of product.variants ?? []) {
+    if (v.is_available) available.add(v.id);
+    if (v.is_enabled && !v.is_available) disabled.push(v.id);
+  }
+
+  if (disabled.length > 0) {
+    const variants = product.variants.map((v) => ({
+      id: v.id,
+      price: v.price,
+      is_enabled: v.is_enabled && v.is_available,
+    }));
+    await http.put(`/shops/${shopId}/products/${productId}.json`, { variants });
+  }
+
+  return { available, disabled, economyEligible: product.is_economy_shipping_eligible === true };
+}
+
+/** Turns on Printify's economy (cheapest) shipping. No-op cost if already enabled. */
+export async function enableEconomyShipping(shopId: string, productId: string): Promise<void> {
+  await http.put(`/shops/${shopId}/products/${productId}.json`, {
+    is_economy_shipping_enabled: true,
+  });
+}
+
+export async function deleteProduct(shopId: string, productId: string): Promise<void> {
+  await http.delete(`/shops/${shopId}/products/${productId}.json`);
+}
+
+/**
+ * Enables Etsy's "Personalize" option on a product so buyers can submit custom text.
+ * Printify stores this under `sales_channel_properties.personalisation` (British spelling).
+ * Partial PUT — merges with any existing sales_channel_properties.
+ */
+export async function setPersonalization(
+  shopId: string,
+  productId: string,
+  opts: { instructions: string; buyerResponseLimit: number }
+): Promise<void> {
+  const product = await getProduct(shopId, productId);
+  const existing =
+    (product as unknown as { sales_channel_properties?: Record<string, unknown> })
+      .sales_channel_properties ?? {};
+  await http.put(`/shops/${shopId}/products/${productId}.json`, {
+    sales_channel_properties: {
+      ...existing,
+      personalisation: {
+        instructions: opts.instructions,
+        buyer_response_limit: opts.buyerResponseLimit,
+      },
+    },
+  });
 }
 
 // Note: Printify's POST /products/{id}/publish.json triggers sales-channel publishing.

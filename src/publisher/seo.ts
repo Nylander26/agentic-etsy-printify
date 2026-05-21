@@ -31,13 +31,17 @@ Design details:
 - Price: $${price.toFixed(2)}
 - Competitor avg price: $${avgNichePrice.toFixed(2)}
 - Research keywords: ${nicheKeywords.slice(0, 10).join(", ")}
+- Original design brief (what the artwork actually depicts — mine it for buyer search terms):
+"""
+${(meta.prompt ?? "").slice(0, 1200)}
+"""
 
 Write Etsy listing copy that maximizes search visibility and conversion.
 
 Rules:
 - Title: max 140 chars, start with the most important keyword, natural language
 - Description: minimum 2000 chars, weave keywords naturally, include product details, gift ideas, care instructions. Use line breaks for readability. No markdown headers.
-- Tags: exactly 13 tags, each max 20 chars, use long-tail keywords, no duplicates
+- Tags: exactly 13 tags, each max 20 chars, use long-tail keywords, no duplicates. Derive tags from the actual subject matter in the design brief AND the niche/research keywords — match how buyers would search for this exact design.
 - taxonomyId: use ${TAXONOMY_IDS[meta.product]}
 
 Respond ONLY with valid JSON:

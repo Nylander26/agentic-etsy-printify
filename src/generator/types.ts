@@ -53,12 +53,15 @@ export interface DesignMetadata {
   files: {
     original: string;           // relative path from project root
     noBg?: string;              // only for tshirt
+    back?: string;              // dedicated back-of-shirt artwork (tshirt only)
+    backNoBg?: string;          // background-removed back artwork
   };
   nicheContext?: NicheContext;        // snapshot of research data — used by validator
   validation?: ValidationResult;      // last validator run
   regenerationCount?: number;         // number of times this concept has been regenerated
   parentDesignId?: string;            // when this is a regeneration of another design
   forceApproved?: boolean;            // user overrode a "rejected" verdict
+  personalizable?: boolean;           // design accepts buyer custom text → enable Etsy "Personalize"
 }
 
 // Printify minimum dimensions per product type

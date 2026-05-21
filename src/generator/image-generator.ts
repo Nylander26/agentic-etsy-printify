@@ -1,7 +1,8 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { generateImage } from "../lib/gemini.js";
-import { buildPrompt } from "./prompt-templates.js";
+import { buildPrompt, buildBackPrompt } from "./prompt-templates.js";
+import { getConfig } from "../lib/config.js";
 import type {
   ProductType,
   VariationKind,
@@ -109,6 +110,21 @@ export async function generateDesign(
   const originalPath = join(dir, `original.${ext}`);
   writeFileSync(originalPath, Buffer.from(imageData.base64, "base64"));
 
+  // Optional dedicated back-of-shirt artwork (tshirt only). A failure here must not
+  // discard the (already-generated) front — we just skip the back.
+  let backPath: string | undefined;
+  if (input.product === "tshirt" && getConfig().generation.tshirt_back_design) {
+    try {
+      const backPrompt = await buildBackPrompt(input.concept, input.style, variation);
+      const backImg = await generateImage(backPrompt, { aspectRatio: PRODUCT_ASPECT_RATIO.tshirt });
+      const backExt = backImg.mimeType.includes("png") ? "png" : "jpg";
+      backPath = join(dir, `back.${backExt}`);
+      writeFileSync(backPath, Buffer.from(backImg.base64, "base64"));
+    } catch (err) {
+      console.log(`      (back skipped: ${err instanceof Error ? err.message : err})`);
+    }
+  }
+
   const metadata: DesignMetadata = {
     id,
     niche: input.niche,
@@ -119,7 +135,7 @@ export async function generateDesign(
     prompt,
     status: "pending-validation",
     createdAt: new Date().toISOString(),
-    files: { original: originalPath },
+    files: { original: originalPath, ...(backPath ? { back: backPath } : {}) },
     regenerationCount: regenCount,
     ...(input.nicheContext ? { nicheContext: input.nicheContext } : {}),
     ...(input.regenerationContext ? { parentDesignId: input.regenerationContext.parentId } : {}),

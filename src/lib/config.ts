@@ -26,6 +26,7 @@ const schema = z.object({
     variations_per_design: z.number().int().default(3),
     style_preference: z.string().default("minimalist, clean"),
     remove_background: z.boolean().default(false),
+    tshirt_back_design: z.boolean().default(false),
   }),
   validator: z
     .object({
@@ -48,6 +49,17 @@ const schema = z.object({
     // If set, each approved design is also drafted on these extra product types,
     // re-using the same source artwork resized to each target's print dimensions.
     fan_out_products: z.array(z.enum(["tshirt", "mug", "poster"])).optional(),
+    personalization: z
+      .object({
+        enabled: z.boolean().default(true),
+        instructions: z
+          .string()
+          .default("Add the exact name/text you want printed. Message us for special requests."),
+        buyer_response_limit: z.number().int().min(1).max(1024).default(50),
+        auto_detect: z.boolean().default(true),
+      })
+      .default({}),
+    prefer_economy_shipping: z.boolean().default(true),
   }),
   gemini: z.object({
     model_text: z.string().default("gemini-2.0-flash"),

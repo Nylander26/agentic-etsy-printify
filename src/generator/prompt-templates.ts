@@ -88,6 +88,33 @@ Rules:
 - Output ONLY the improved prompt, no explanation.
 `.trim();
 
+// Back-of-shirt design: a SMALL, simple complementary mark — not a second full illustration.
+// Sits on the upper back; must read at a glance and stay visually consistent with the front.
+const BACK_TEMPLATE =
+  "A small, simple complementary back-of-shirt graphic on a pure white background. {concept}. " +
+  "Compact emblem, badge, short tagline, or minimal logo mark — NOT a large or detailed scene. " +
+  "Keep it to a single focal element with at most a couple of accent doodles. " +
+  "Use a color palette consistent with the front design. Centered, small footprint suitable for " +
+  "an upper-back placement, transparent-ready, no mockup, no garment, print-ready DTG artwork.";
+
+export async function buildBackPrompt(
+  concept: string,
+  style: string,
+  variation: VariationKind,
+  optimize = true
+): Promise<string> {
+  const base = BACK_TEMPLATE.replace("{concept}", concept);
+  const modifier = variation === "dark" ? ` ${VARIATION_MODIFIERS.dark}` : "";
+  const withMod = `${base}${modifier}`;
+  if (!optimize) return withMod;
+  try {
+    const optimized = await generateText(OPTIMIZER_PROMPT(concept, style, "tshirt", withMod));
+    return optimized.trim();
+  } catch {
+    return withMod;
+  }
+}
+
 export async function buildPrompt(
   concept: string,
   style: string,
