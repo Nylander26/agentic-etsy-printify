@@ -48,7 +48,7 @@ lifecycle/TTL) tras una subida exitosa.
 3. `src/publisher/index.ts` `draftDesign`: decidir por tamaño —
    ```ts
    const base64Bytes = Math.ceil(buf.length / 3) * 4;
-   if (base64Bytes > UPLOAD_URL_THRESHOLD) {        // p.ej. > 8 MB
+   if (base64Bytes > UPLOAD_URL_THRESHOLD) {        // p.ej. > 10 MB
      const { url, cleanup } = await putTempObject(buf, `${meta.id}-${product}.png`);
      uploaded = await uploadImageUrl(name, url);
      await cleanup();                                // Printify ya la copió

@@ -10,6 +10,10 @@ const BASE_TEMPLATES: Record<ProductType, string> = {
     "Curated color palette with 3-5 harmonious tones — warm pastels, dusty earth tones, " +
     "or vibrant retro hues (avoid flat monochrome). Bold script or display lettering when text is present, " +
     "paired with doodle accents. Centered composition, no mockup, no t-shirt shape, transparent-ready. " +
+    "CRITICAL: the artwork must be a single self-contained graphic floating as a compact island on " +
+    "plain white, with generous EMPTY MARGIN on all four sides. It must NOT bleed to the edges: no " +
+    "full-canvas background fill, no edge-to-edge or repeating/tiled pattern, no background scenery, " +
+    "flags, banners or borders that reach the canvas edges. Nothing is cut off by the frame. " +
     "Commercial Etsy bestseller aesthetic, lively and full of personality, print-ready DTG artwork.",
 
   mug:
@@ -81,7 +85,10 @@ Rules:
   leaves, sparkles, dingbats, swooshes — at least 2 types repeated naturally.
 - When text is present, specify the font character (e.g. "thick retro varsity serif",
   "loose cursive script", "chunky bold sans") and pair with accent doodles.
-- For tshirts: always "transparent/white background, centered composition, no mockup, no garment"
+- For tshirts: always "transparent/white background, single self-contained centered graphic floating
+  as a compact island with clear empty margin on all sides, NO full-bleed background, NO edge-to-edge
+  or repeating pattern, NO background scenery/flags/borders reaching the edges, nothing cut off, no
+  mockup, no garment". A t-shirt print is a contained graphic, NOT a mug wrap or a full-bleed poster.
 - For mugs: always "seamless horizontal wrap-around, white background, no distortion"
 - For posters: always "portrait orientation, fine art print, decorative border or framing motifs"
 - AVOID these words: minimalist, simple, clean, plain, basic, flat-only, sterile.
@@ -95,7 +102,9 @@ const BACK_TEMPLATE =
   "Compact emblem, badge, short tagline, or minimal logo mark — NOT a large or detailed scene. " +
   "Keep it to a single focal element with at most a couple of accent doodles. " +
   "Use a color palette consistent with the front design. Centered, small footprint suitable for " +
-  "an upper-back placement, transparent-ready, no mockup, no garment, print-ready DTG artwork.";
+  "an upper-back placement, with clear empty margin on all sides — no full-bleed background, no " +
+  "edge-to-edge pattern, nothing cut off by the frame. Transparent-ready, no mockup, no garment, " +
+  "print-ready DTG artwork.";
 
 export async function buildBackPrompt(
   concept: string,

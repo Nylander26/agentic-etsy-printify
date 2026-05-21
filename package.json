@@ -15,6 +15,7 @@
     "test:apis": "tsx src/test-apis.ts",
     "list:variants": "tsx scripts/list-variants.ts",
     "dedup": "tsx scripts/dedup-drafts.ts",
+    "find-cropped": "tsx scripts/find-cropped.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
   },
