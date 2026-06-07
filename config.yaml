@@ -57,7 +57,13 @@ publishing:
   # tienda Etsy real para que los drafts propaguen a Etsy. `pnpm tsx -e` o el nuke
   # script listan los ids. 17619612 = "My Etsy Store" (sales_channel=etsy).
   shop_id: 17619612
-  margin_percent: 50
+  margin_percent: 50          # legacy — el pricing real usa target_net_margin (abajo)
+  # Pricing por margen NETO: precio = (coste prenda + envío + fee fijo Etsy) / (1 - fee% Etsy - target_net_margin)
+  # target_net_margin = beneficio DESPUÉS de prenda, envío absorbido (free_shipping) y fees de Etsy.
+  # Con tee Monster (~$13.50) + economy $4.29 + 0.11 → $22.99 (~11% neto). Mercado POD dad-shirt: $20-27.
+  free_shipping: true         # mete el envío en el precio (Etsy rankea mejor los listings con free shipping)
+  shipping_cost_usd: 4.29     # economy, solo US — absorbido cuando free_shipping=true
+  target_net_margin: 0.11     # ~11% neto
   max_publish_per_run: 25
   # Límite de subida base64 a Printify (MB). Por encima, la imagen se cuantiza (lossy) para
   # entrar. El límite real del body de Printify ronda 10MB. Subilo si ves cuantización

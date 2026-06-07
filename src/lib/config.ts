@@ -44,7 +44,12 @@ const schema = z.object({
     // only fall back to the first shop. Pin this so the pipeline never drafts into the
     // wrong store (e.g. a custom_integration shop) when the account has several.
     shop_id: z.number().int().optional(),
-    margin_percent: z.number().min(10).max(80).default(50),
+    margin_percent: z.number().min(10).max(80).default(50), // legacy; pricing now uses target_net_margin
+    // Net-margin pricing: retail = (garment + shipping + Etsy fixed fee) / (1 - etsy_rate - target_net_margin).
+    // target_net_margin is profit AFTER garment cost, absorbed shipping (free_shipping) and Etsy fees.
+    free_shipping: z.boolean().default(true),
+    shipping_cost_usd: z.number().min(0).max(50).default(4.29),
+    target_net_margin: z.number().min(0.0).max(0.6).default(0.11),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
     // Max base64 upload body to Printify (MB). Above this, the image is palette-quantized
     // to fit (lossy). Printify's POST body limit is ~10MB; bump if you see needless

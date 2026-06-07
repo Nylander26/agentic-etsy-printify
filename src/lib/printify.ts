@@ -186,6 +186,7 @@ export interface CreateProductInput {
   description: string;
   blueprintId: number;
   printProviderId: number;
+  tags?: string[]; // Etsy/Printify listing tags (max 13 on Etsy)
   variants: Array<{
     id: number;
     price: number; // in cents
@@ -208,6 +209,8 @@ export async function createProduct(input: CreateProductInput): Promise<Printify
       description: input.description,
       blueprint_id: input.blueprintId,
       print_provider_id: input.printProviderId,
+      // Etsy caps tags at 13; trim defensively so Printify doesn't reject the payload.
+      ...(input.tags?.length ? { tags: input.tags.slice(0, 13) } : {}),
       variants: input.variants,
       print_areas: input.printAreas,
     }

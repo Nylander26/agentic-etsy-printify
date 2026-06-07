@@ -22,7 +22,6 @@ import {
   disableUnavailableVariants,
   deleteProduct,
   setPersonalization,
-  enableEconomyShipping,
 } from "../lib/printify.js";
 import { isDrafted, recordDraft } from "../lib/draft-index.js";
 import { generateSEO } from "./seo.js";
@@ -144,10 +143,6 @@ function alreadyDraftedFor(meta: DesignMetadata, product: ProductType): boolean 
 // main() so memory stays bounded (a design has at most ~2 distinct sources across its targets).
 const upscaleCache = new Map<string, Buffer>();
 
-// Economy-shipping eligibility is per blueprint+provider — learned on the first reconcile.
-const economyEligibleCache = new Map<string, boolean>();
-const bpKey = (blueprintId: number, providerId: number) => `${blueprintId}:${providerId}`;
-
 // Concept/title cues that imply a buyer-customizable (personalized) design.
 const PERSONALIZATION_CUES =
   /personali[sz]|custom(?:ize|ise|ized|ised)?\b|custom name|add (?:your )?name|your name|monogram|name & number|name and number/i;
@@ -233,8 +228,12 @@ async function draftDesign(
   const uploaded = await uploadImageBase64(`${meta.id}-${targetProduct}.png`, base64);
   console.log(`✓ (${uploaded.id})`);
 
-  const margin = getConfig().publishing.margin_percent;
-  const pricing = calculatePrice(targetProduct, { marginPercent: margin });
+  const pub = getConfig().publishing;
+  const pricing = calculatePrice(targetProduct, {
+    targetNetMargin: pub.target_net_margin,
+    freeShipping: pub.free_shipping,
+    shippingCost: pub.shipping_cost_usd,
+  });
   const priceInCents = Math.round(pricing.suggestedPrice * 100);
 
   process.stdout.write("    Generating SEO metadata... ");
@@ -272,7 +271,6 @@ async function draftDesign(
   // variants" cache can't be reused (it would wrongly drop a set it never reconciled).
   // We draft all intended variants and reconcile each product against provider stock
   // after creation instead.
-  const key = bpKey(blueprint.blueprintId, blueprint.printProviderId);
   const intendedVariants = baseVariants;
 
   process.stdout.write("    Creating Printify DRAFT... ");
@@ -282,6 +280,7 @@ async function draftDesign(
     description: seo.description,
     blueprintId: blueprint.blueprintId,
     printProviderId: blueprint.printProviderId,
+    tags: seo.tags ?? [],
     variants: intendedVariants.map((v) => ({
       id: v.id,
       price: priceInCents,
@@ -300,8 +299,7 @@ async function draftDesign(
   // product's variants. Disable any out-of-stock variant. If nothing sellable remains,
   // delete the draft instead of leaving a product nobody can buy.
   process.stdout.write("    Checking variant stock... ");
-  const { available, disabled, economyEligible } = await disableUnavailableVariants(shopId, product.id);
-  economyEligibleCache.set(key, economyEligible);
+  const { available, disabled } = await disableUnavailableVariants(shopId, product.id);
   const sellable = intendedVariants.filter((v) => available.has(v.id));
   if (sellable.length === 0) {
     console.log("✗ sin stock — borrando draft");
@@ -314,16 +312,10 @@ async function draftDesign(
       : "✓ todas con stock"
   );
 
-  // Cheapest shipping (US-only store): enable Printify economy shipping when eligible.
-  if (getConfig().publishing.prefer_economy_shipping && economyEligibleCache.get(key)) {
-    process.stdout.write("    Enabling economy shipping... ");
-    try {
-      await enableEconomyShipping(shopId, product.id);
-      console.log("✓");
-    } catch (err) {
-      console.log(`SKIP (${err instanceof Error ? err.message : err})`);
-    }
-  }
+  // NOTE: shipping method (Economy vs Standard) is NOT set here — the Printify
+  // `is_economy_shipping_enabled` flag is read-only at the product level. Set the
+  // default shipping method to Economy once in Printify → Store settings; the
+  // "Automatically assign profile" option then applies it on publish.
 
   // Mockup selection is deferred to a SECOND pass after all products are created —
   // Printify renders mockups asynchronously (often >1 min), so waiting inline here
