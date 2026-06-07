@@ -61,43 +61,53 @@ interface DraftedMeta extends DesignMetadata {
 async function waitForMockups(
   shopId: string,
   productId: string,
-  timeoutMs = 150_000,
+  timeoutMs = 180_000,
   intervalMs = 5_000
 ): Promise<Awaited<ReturnType<typeof getProduct>>> {
   const deadline = Date.now() + timeoutMs;
   let last = await getProduct(shopId, productId);
-  // Printify renders mockups incrementally — the first poll often shows just one
-  // image while the rest are still rendering. Don't return on the first image:
-  // wait until the count is non-zero AND unchanged across a poll (render settled).
+  // Printify renders mockups incrementally AND auto-selects each as it appears, so a
+  // naive "first non-zero" or "stable across one poll" check exits mid-render (we once
+  // curated a product down to 1 photo). Require the count to hold steady for several
+  // consecutive polls (~15s of no change) before concluding the render has settled.
+  const STABLE_POLLS = 3;
+  let prev = last.images?.length ?? 0;
+  let stable = 0;
   while (Date.now() < deadline) {
-    const count = last.images?.length ?? 0;
     await new Promise((r) => setTimeout(r, intervalMs));
-    const next = await getProduct(shopId, productId);
-    last = next;
-    if (count > 0 && (next.images?.length ?? 0) === count) break;
+    last = await getProduct(shopId, productId);
+    const count = last.images?.length ?? 0;
+    if (count > 0 && count === prev) {
+      if (++stable >= STABLE_POLLS) break;
+    } else {
+      stable = 0;
+    }
+    prev = count;
   }
   return last;
 }
 
 /**
- * Picks up to `target` diverse mockups (varying camera positions) and marks them
- * for sales-channel publishing. Always includes the default front mockup.
- * Returns number of mockups selected.
+ * Curates which mockups Printify pushes to Etsy. Printify renders ~1 mockup per garment
+ * COLOR and auto-selects all of them; left alone, a 12-color product would exceed Etsy's
+ * 10-photo cap. We wait for the render to settle, then select up to `max` mockups with
+ * COLOR diversity (one per color first, default front always included). Returns the count.
  */
-async function selectDiverseMockups(
+export async function selectDiverseMockups(
   shopId: string,
   productId: string,
-  target: number
+  max = 10
 ): Promise<number> {
   const full = await waitForMockups(shopId, productId);
   if (!full.images?.length) return 0;
 
-  // Group by position so we get camera-angle diversity, not 6 nearly-identical shots.
-  const byPosition = new Map<string, typeof full.images>();
+  // Mockups for one garment color share the same variant_ids. Group by color so the
+  // round-robin spreads the selection across colors instead of stacking one color.
+  const byColor = new Map<string, typeof full.images>();
   for (const img of full.images) {
-    const pos = img.position || "front";
-    if (!byPosition.has(pos)) byPosition.set(pos, []);
-    byPosition.get(pos)!.push(img);
+    const key = [...(img.variant_ids ?? [])].sort((a, b) => a - b).join(",") || img.position || "front";
+    if (!byColor.has(key)) byColor.set(key, []);
+    byColor.get(key)!.push(img);
   }
 
   const selected: string[] = [];
@@ -105,16 +115,16 @@ async function selectDiverseMockups(
   const def = full.images.find((i) => i.is_default);
   if (def) selected.push(def.src);
 
-  // Round-robin one per position until we hit target
-  const queues = [...byPosition.values()].map((arr) => [...arr]);
-  while (selected.length < target) {
+  // Round-robin one per color until we hit max (or run out)
+  const queues = [...byColor.values()].map((arr) => [...arr]);
+  while (selected.length < max) {
     let added = false;
     for (const q of queues) {
       const next = q.shift();
       if (next && !selected.includes(next.src)) {
         selected.push(next.src);
         added = true;
-        if (selected.length >= target) break;
+        if (selected.length >= max) break;
       }
     }
     if (!added) break;
@@ -468,7 +478,7 @@ export async function publishApproved(): Promise<{ drafted: number; failed: numb
     for (const entry of packEntries) {
       process.stdout.write(`  ${entry.printifyProductId} (${entry.product})... `);
       try {
-        const n = await selectDiverseMockups(shop.id, entry.printifyProductId, 6);
+        const n = await selectDiverseMockups(shop.id, entry.printifyProductId, 10);
         if (n > 0) withMockups++;
         console.log(`✓ ${n} mockups`);
       } catch (err) {
