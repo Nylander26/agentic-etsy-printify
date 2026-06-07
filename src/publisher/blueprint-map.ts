@@ -21,33 +21,67 @@ export interface BlueprintConfig {
   backPosition?: string;
 }
 
+// ── T-shirt garment colors (Bella+Canvas 3001 / Monster Digital, prov 29) ──────
+// Printify renders ONE front mockup per garment COLOR (verified live), so 6 colors
+// = 6 listing photos → satisfies Etsy's "add 6 photos" nudge with real product
+// shots (no Gemini, no distortion). Each color maps to its S-2XL variant ids
+// (catalog-verified June 2026; some colors don't stock every size — stock reconcile
+// trims the rest at publish time). Ink-vs-garment contrast matters, so colors are
+// split into DARK and LIGHT sets and chosen by the design's variation:
+//   - "dark"  variation = light/cream artwork  → DARK garments
+//   - "base" / "no-text" = dark/colored artwork → LIGHT garments
+const TSHIRT_COLORS = {
+  // Dark garments (light artwork shows)
+  black: [17427, 17428, 17429, 17430, 17431],
+  navy: [17562, 17563, 17564, 17565, 17566],
+  darkChocolate: [17463, 17464, 17465, 17466, 17467],
+  heavyMetal: [17481, 17482, 17483, 17484, 17485], // charcoal
+  cardinalRed: [64932, 64933, 64934, 64935, 64936],
+  kellyGreen: [17508, 17509, 17510, 17511, 17512],
+  // Light garments (dark artwork shows)
+  white: [17644, 17645, 17646, 17647], // no S in catalog
+  natural: [17499, 17500, 17501, 17502], // no 2XL
+  cream: [17454, 17455, 17457, 17458], // no L
+  lightPink: [17544, 17545, 17546, 17547, 17548],
+  lightGrey: [17526, 17527, 17528], // S-L only
+  heatherGrey: [17392, 17394, 17395], // M/XL/2XL only
+} as const;
+
+const TSHIRT_DARK_SET = [
+  ...TSHIRT_COLORS.black,
+  ...TSHIRT_COLORS.navy,
+  ...TSHIRT_COLORS.darkChocolate,
+  ...TSHIRT_COLORS.heavyMetal,
+  ...TSHIRT_COLORS.cardinalRed,
+  ...TSHIRT_COLORS.kellyGreen,
+];
+const TSHIRT_LIGHT_SET = [
+  ...TSHIRT_COLORS.white,
+  ...TSHIRT_COLORS.natural,
+  ...TSHIRT_COLORS.cream,
+  ...TSHIRT_COLORS.lightPink,
+  ...TSHIRT_COLORS.lightGrey,
+  ...TSHIRT_COLORS.heatherGrey,
+];
+
+/**
+ * T-shirt variant ids (6 garment colors × available sizes) for a design variation.
+ * "dark" artwork → dark garments; everything else (base/no-text) → light garments.
+ */
+export function tshirtVariantsForVariation(variation: string): Array<{ id: number; price: number }> {
+  const ids = variation === "dark" ? TSHIRT_DARK_SET : TSHIRT_LIGHT_SET;
+  return ids.map((id) => ({ id, price: 0 }));
+}
+
 export const BLUEPRINT_MAP: Record<ProductType, BlueprintConfig> = {
   tshirt: {
-    // Blueprint 5 = Unisex Jersey Short Sleeve Tee — Monster Digital provider 29
-    // 3 top-seller colors (Black, White, Midnight Navy) × S-2XL.
-    // Variant IDs confirmed via `pnpm list:variants 5 29`.
+    // Blueprint 5 = Unisex Jersey Short Sleeve Tee — Monster Digital provider 29.
+    // defaultVariants is the LIGHT set (fallback); the publisher overrides per
+    // variation via tshirtVariantsForVariation() so each design gets 6 contrast-
+    // correct colors = 6 mockups.
     blueprintId: 5,
     printProviderId: 29,
-    defaultVariants: [
-      // Solid Black
-      { id: 17427, price: 0 },  // S
-      { id: 17428, price: 0 },  // M
-      { id: 17429, price: 0 },  // L
-      { id: 17430, price: 0 },  // XL
-      { id: 17431, price: 0 },  // 2XL
-      // Solid White
-      { id: 17643, price: 0 },  // S
-      { id: 17644, price: 0 },  // M
-      { id: 17645, price: 0 },  // L
-      { id: 17646, price: 0 },  // XL
-      { id: 17647, price: 0 },  // 2XL
-      // Solid Midnight Navy
-      { id: 17562, price: 0 },  // S
-      { id: 17563, price: 0 },  // M
-      { id: 17564, price: 0 },  // L
-      { id: 17565, price: 0 },  // XL
-      { id: 17566, price: 0 },  // 2XL
-    ],
+    defaultVariants: TSHIRT_LIGHT_SET.map((id) => ({ id, price: 0 })),
     printPosition: "front",
     backPosition: "back",
   },

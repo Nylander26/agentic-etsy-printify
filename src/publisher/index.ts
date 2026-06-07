@@ -27,7 +27,7 @@ import {
 import { isDrafted, recordDraft } from "../lib/draft-index.js";
 import { generateSEO } from "./seo.js";
 import { calculatePrice } from "./pricing.js";
-import { BLUEPRINT_MAP } from "./blueprint-map.js";
+import { BLUEPRINT_MAP, tshirtVariantsForVariation } from "./blueprint-map.js";
 import { writeEtsyPack, type EtsyPackEntry } from "./etsy-pack.js";
 import type { DesignMetadata, ProductType } from "../generator/types.js";
 import { resizeForPrintify, removeBackground, compressForUpload } from "../generator/post-processor.js";
@@ -66,9 +66,15 @@ async function waitForMockups(
 ): Promise<Awaited<ReturnType<typeof getProduct>>> {
   const deadline = Date.now() + timeoutMs;
   let last = await getProduct(shopId, productId);
-  while ((last.images?.length ?? 0) === 0 && Date.now() < deadline) {
+  // Printify renders mockups incrementally — the first poll often shows just one
+  // image while the rest are still rendering. Don't return on the first image:
+  // wait until the count is non-zero AND unchanged across a poll (render settled).
+  while (Date.now() < deadline) {
+    const count = last.images?.length ?? 0;
     await new Promise((r) => setTimeout(r, intervalMs));
-    last = await getProduct(shopId, productId);
+    const next = await getProduct(shopId, productId);
+    last = next;
+    if (count > 0 && (next.images?.length ?? 0) === count) break;
   }
   return last;
 }
@@ -145,12 +151,7 @@ function alreadyDraftedFor(meta: DesignMetadata, product: ProductType): boolean 
 // main() so memory stays bounded (a design has at most ~2 distinct sources across its targets).
 const upscaleCache = new Map<string, Buffer>();
 
-// Provider stock is per blueprint+provider, identical across all products that share them.
-// Cache the available variant ids the first time we reconcile one, so subsequent drafts
-// pre-filter their variant payload without re-creating-then-disabling. Persists across the
-// whole run (NOT cleared per design — availability doesn't change between designs).
-const availableVariantsCache = new Map<string, Set<number>>();
-// Economy-shipping eligibility is also per blueprint+provider — learned on the first reconcile.
+// Economy-shipping eligibility is per blueprint+provider — learned on the first reconcile.
 const economyEligibleCache = new Map<string, boolean>();
 const bpKey = (blueprintId: number, providerId: number) => `${blueprintId}:${providerId}`;
 
@@ -186,6 +187,11 @@ async function draftDesign(
   targetProduct: ProductType
 ): Promise<EtsyPackEntry | null> {
   const blueprint = BLUEPRINT_MAP[targetProduct];
+  // T-shirts get a 6-color set chosen by the design's variation (dark artwork → dark
+  // garments, base/no-text → light garments) so every product yields 6 contrast-correct
+  // color mockups. Other products use their blueprint default variants.
+  const baseVariants =
+    targetProduct === "tshirt" ? tshirtVariantsForVariation(meta.variation) : blueprint.defaultVariants;
 
   const sourcePath = resolveSourceImage(meta, targetProduct);
   let imageBuffer: Buffer = readFileSync(sourcePath);
@@ -269,21 +275,12 @@ async function draftDesign(
     });
   }
 
-  // Stock pre-filter: if we already learned this blueprint+provider's availability this run,
-  // only enable variants the provider actually stocks. Avoids drafting unsellable variants.
+  // Per-variation color sets differ between designs, so a cross-product "available
+  // variants" cache can't be reused (it would wrongly drop a set it never reconciled).
+  // We draft all intended variants and reconcile each product against provider stock
+  // after creation instead.
   const key = bpKey(blueprint.blueprintId, blueprint.printProviderId);
-  const knownAvailable = availableVariantsCache.get(key);
-  const intendedVariants = knownAvailable
-    ? blueprint.defaultVariants.filter((v) => knownAvailable.has(v.id))
-    : blueprint.defaultVariants;
-
-  if (knownAvailable && intendedVariants.length === 0) {
-    console.log(`    ⚠️  ${targetProduct}: ninguna variante con stock en provider ${blueprint.printProviderId} — skip`);
-    return null;
-  }
-  if (knownAvailable && intendedVariants.length < blueprint.defaultVariants.length) {
-    console.log(`    (stock) ${intendedVariants.length}/${blueprint.defaultVariants.length} variantes disponibles`);
-  }
+  const intendedVariants = baseVariants;
 
   process.stdout.write("    Creating Printify DRAFT... ");
   const product = await createProduct({
@@ -306,27 +303,23 @@ async function draftDesign(
   });
   console.log(`✓ (${product.id})`);
 
-  // Stock reconcile (first product of this blueprint+provider this run): Printify only
-  // exposes provider stock via the product's variants. Disable any out-of-stock variant
-  // and learn the available set for the rest of the run. If nothing sellable remains,
+  // Stock reconcile (every product): Printify only exposes provider stock via the
+  // product's variants. Disable any out-of-stock variant. If nothing sellable remains,
   // delete the draft instead of leaving a product nobody can buy.
-  if (!knownAvailable) {
-    process.stdout.write("    Checking variant stock... ");
-    const { available, disabled, economyEligible } = await disableUnavailableVariants(shopId, product.id);
-    availableVariantsCache.set(key, available);
-    economyEligibleCache.set(key, economyEligible);
-    const sellable = intendedVariants.filter((v) => available.has(v.id));
-    if (sellable.length === 0) {
-      console.log("✗ sin stock — borrando draft");
-      await deleteProduct(shopId, product.id);
-      return null;
-    }
-    console.log(
-      disabled.length > 0
-        ? `✓ ${sellable.length}/${intendedVariants.length} con stock (${disabled.length} deshabilitadas)`
-        : "✓ todas con stock"
-    );
+  process.stdout.write("    Checking variant stock... ");
+  const { available, disabled, economyEligible } = await disableUnavailableVariants(shopId, product.id);
+  economyEligibleCache.set(key, economyEligible);
+  const sellable = intendedVariants.filter((v) => available.has(v.id));
+  if (sellable.length === 0) {
+    console.log("✗ sin stock — borrando draft");
+    await deleteProduct(shopId, product.id);
+    return null;
   }
+  console.log(
+    disabled.length > 0
+      ? `✓ ${sellable.length}/${intendedVariants.length} con stock (${disabled.length} deshabilitadas)`
+      : "✓ todas con stock"
+  );
 
   // Cheapest shipping (US-only store): enable Printify economy shipping when eligible.
   if (getConfig().publishing.prefer_economy_shipping && economyEligibleCache.get(key)) {
