@@ -32,7 +32,10 @@ const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 4 });
 
 const client = axios.create({
   baseURL: BASE_URL,
-  timeout: 300_000,
+  // run-sync ties the HTTP lifetime to the whole actor run. The actor can be slow
+  // (residential proxy + retries) — 600s avoids aborting a slow-but-successful run,
+  // which would otherwise return EMPTY and starve a single-seed pipeline of niches.
+  timeout: 600_000,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
   validateStatus: (s) => s < 500,
   httpsAgent,
@@ -106,7 +109,9 @@ export async function fetchMarketplaceSignals(keyword: string): Promise<Marketpl
     const path = `/acts/${ETSY_ACTOR}/run-sync-get-dataset-items`;
     const body = {
       searchQuery: keyword,
-      maxItems: 50,
+      // 25 is plenty: we only read the top ~8-10 titles/positions for the demand
+      // proxy. Fewer items = faster, cheaper runs (the actor scrapes per-page).
+      maxItems: 25,
       sort: "most_relevant",
       proxyConfiguration: {
         useApifyProxy: true,

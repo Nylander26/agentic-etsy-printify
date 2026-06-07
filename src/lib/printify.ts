@@ -101,6 +101,37 @@ export async function getShops(): Promise<PrintifyShop[]> {
   return res.data;
 }
 
+/**
+ * Picks the shop to publish into. Precedence:
+ *   1. `configuredId` (publishing.shop_id) — exact match wins, even for non-Etsy shops.
+ *   2. the Etsy-linked shop (sales_channel === "etsy") — only this propagates to Etsy.
+ *   3. shops[0] — last resort, with a loud warning.
+ * Throws if the account has no shops at all.
+ */
+export async function resolvePublishShop(configuredId?: number): Promise<PrintifyShop> {
+  const shops = await getShops();
+  if (!shops.length) throw new Error("No Printify shop found. Vincula tu tienda en Printify primero.");
+
+  if (configuredId !== undefined) {
+    const pinned = shops.find((s) => String(s.id) === String(configuredId));
+    if (pinned) return pinned;
+    console.warn(
+      `⚠️  publishing.shop_id=${configuredId} no existe en tu cuenta — ignorado. Tiendas: ${shops
+        .map((s) => `${s.title}(${s.id})`)
+        .join(", ")}`
+    );
+  }
+
+  const etsy = shops.find((s) => s.sales_channel === "etsy");
+  if (etsy) return etsy;
+
+  console.warn(
+    `⚠️  Ninguna tienda Etsy vinculada — usando "${shops[0]!.title}" (${shops[0]!.sales_channel}). ` +
+      `Los drafts NO propagarán a Etsy. Fija publishing.shop_id en config.yaml.`
+  );
+  return shops[0]!;
+}
+
 // ── Blueprints (product catalog) ──────────────────────────────────────────────
 
 export async function getBlueprints(): Promise<Blueprint[]> {

@@ -18,15 +18,13 @@ import {
   saveNicheAnalysis,
   wasDesignGeneratedRecently,
   saveDesign,
-  savePublishedProduct,
 } from "./lib/db.js";
 import { fetchMarketplaceSignals } from "./research/apify-source.js";
 import { discoverNiches } from "./research/discovery.js";
 import { askApproval } from "./lib/approval.js";
 import { analyzeNiche, rankNiches } from "./research/niche-analyzer.js";
 import { generateAllVariations } from "./generator/image-generator.js";
-import { postProcess, compressForUpload, resizeForPrintify } from "./generator/post-processor.js";
-import { isUpscalerEnabled, upscaleBuffer } from "./lib/upscaler.js";
+import { postProcess } from "./generator/post-processor.js";
 import { buildValidatorPrompt, normalizeValidation } from "./validator/criteria.js";
 import {
   persistApprovedOrBorderline,
@@ -35,13 +33,8 @@ import {
   autoRegenerate,
   markRejected,
 } from "./validator/loop-control.js";
-import { walkDesigns } from "./lib/design-store.js";
 import { analyzeImage } from "./lib/gemini.js";
-import { getShops, uploadImageBase64, createProduct } from "./lib/printify.js";
-import { generateSEO } from "./publisher/seo.js";
-import { calculatePrice } from "./publisher/pricing.js";
-import { BLUEPRINT_MAP } from "./publisher/blueprint-map.js";
-import { writeEtsyPack, type EtsyPackEntry } from "./publisher/etsy-pack.js";
+import { publishApproved } from "./publisher/index.js";
 import type { ProductType, DesignMetadata, NicheContext, ValidationResult } from "./generator/types.js";
 import type { NicheAnalysis, NicheData } from "./research/types.js";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -67,10 +60,6 @@ function waitForEnter(prompt: string): Promise<void> {
   return new Promise((resolve) => {
     rl.question(prompt, () => { rl.close(); resolve(); });
   });
-}
-
-function findApprovedDesigns(): Array<{ meta: DesignMetadata; metaPath: string }> {
-  return walkDesigns("approved", (m) => m.status === "approved");
 }
 
 // ── Phase 0: Discovery (only when auto_discover=true) ─────────────────────────
@@ -349,90 +338,13 @@ async function runPause(niches: NicheAnalysis[], totalDesigns: number): Promise<
 async function runPublish(): Promise<number> {
   console.log("\n🚀 [5/6] Publicación (Printify DRAFT + Etsy pack)");
 
-  const approved = findApprovedDesigns();
-  const toPublish = approved.slice(0, config.publishing.max_publish_per_run);
+  // Delegate to the publisher's robust path: pinned/Etsy shop selection, draft-index
+  // dedup, fan-out composition safety, stock reconcile + mockups. (The old bespoke
+  // loop here used shops[0] — drafting into the wrong store — and hit a SQLite FK on
+  // stale approved/ designs not present in the current designs table.)
+  const { drafted } = await publishApproved();
 
-  if (toPublish.length === 0) {
-    console.log("  No hay diseños aprobados — saltando publicación");
-    return 0;
-  }
-
-  const shops = await getShops();
-  const shop = shops[0];
-  if (!shop) throw new Error("No Printify shop found");
-
-  console.log(`  Creando ${toPublish.length} drafts en "${shop.title}"...`);
-  let drafted = 0;
-  const packEntries: EtsyPackEntry[] = [];
-
-  for (const { meta, metaPath } of toPublish) {
-    try {
-      const blueprint = BLUEPRINT_MAP[meta.product];
-      const imagePath = meta.product === "tshirt" && meta.files.noBg
-        ? meta.files.noBg : meta.files.original;
-
-      let imgBuf: Buffer = readFileSync(imagePath);
-      if (isUpscalerEnabled()) {
-        try { imgBuf = await upscaleBuffer(imgBuf); } catch { /* fallback to plain resize */ }
-      }
-      imgBuf = await resizeForPrintify(imgBuf, meta.product);
-      const base64 = (await compressForUpload(imgBuf)).toString("base64");
-      const uploaded = await uploadImageBase64(`${meta.id}.png`, base64);
-
-      const pricing = calculatePrice(meta.product, { marginPercent: config.publishing.margin_percent });
-      const seo = await generateSEO(meta, [], pricing.suggestedPrice);
-      const priceInCents = Math.round(pricing.suggestedPrice * 100);
-
-      const product = await createProduct({
-        shopId: shop.id,
-        title: seo.title,
-        description: seo.description,
-        blueprintId: blueprint.blueprintId,
-        printProviderId: blueprint.printProviderId,
-        variants: blueprint.defaultVariants.map((v) => ({
-          id: v.id, price: priceInCents, is_enabled: true,
-        })),
-        printAreas: [{
-          variant_ids: blueprint.defaultVariants.map((v) => v.id),
-          placeholders: [{
-            position: blueprint.printPosition,
-            images: [{ id: uploaded.id, x: 0.5, y: 0.5, scale: 1, angle: 0 }],
-          }],
-        }],
-      });
-
-      // Product remains as DRAFT in Printify — user publishes manually
-      savePublishedProduct(meta.id, product.id, seo.title, pricing.suggestedPrice);
-
-      const updatedMeta = { ...meta, printifyProductId: product.id, draftedAt: new Date().toISOString() };
-      writeFileSync(metaPath, JSON.stringify(updatedMeta, null, 2));
-
-      packEntries.push({
-        designId: meta.id,
-        niche: meta.niche,
-        product: meta.product,
-        printifyProductId: product.id,
-        title: seo.title,
-        description: seo.description,
-        tags: seo.tags ?? [],
-        suggestedPrice: pricing.suggestedPrice,
-      });
-
-      console.log(`  ✅ DRAFT "${seo.title.slice(0, 50)}..."`);
-      drafted++;
-    } catch (err) {
-      console.error(`  ❌ ${meta.id}: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  if (packEntries.length > 0) {
-    const packPath = writeEtsyPack(packEntries);
-    console.log(`\n  📦 Etsy pack: ${packPath}`);
-    console.log(`  → Publica manualmente desde Printify dashboard ("Publish to Etsy")`);
-    console.log(`     o usa el pack JSON para crear los listings en Etsy.`);
-  }
-
-  if (config.pipeline.notify_telegram) {
+  if (config.pipeline.notify_telegram && drafted > 0) {
     await notifyPublished(drafted);
   }
 

@@ -40,6 +40,10 @@ const schema = z.object({
     })
     .default({}),
   publishing: z.object({
+    // Printify shop id to publish into. If unset, we prefer the Etsy-linked shop and
+    // only fall back to the first shop. Pin this so the pipeline never drafts into the
+    // wrong store (e.g. a custom_integration shop) when the account has several.
+    shop_id: z.number().int().optional(),
     margin_percent: z.number().min(10).max(80).default(50),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
     // Max base64 upload body to Printify (MB). Above this, the image is palette-quantized

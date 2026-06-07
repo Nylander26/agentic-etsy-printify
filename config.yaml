@@ -52,6 +52,11 @@ validator:
   auto_regenerate: true
 
 publishing:
+  # Printify shop a publicar. La cuenta tiene varias tiendas; sin esto el pipeline
+  # caía en shops[0] ("casephoneshop", custom_integration = NO Etsy). Fijamos la
+  # tienda Etsy real para que los drafts propaguen a Etsy. `pnpm tsx -e` o el nuke
+  # script listan los ids. 17619612 = "My Etsy Store" (sales_channel=etsy).
+  shop_id: 17619612
   margin_percent: 50
   max_publish_per_run: 25
   # Límite de subida base64 a Printify (MB). Por encima, la imagen se cuantiza (lossy) para

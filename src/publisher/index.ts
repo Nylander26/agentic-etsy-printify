@@ -10,10 +10,11 @@
  */
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
+import { pathToFileURL } from "url";
 import axios from "axios";
 import { walkDesigns } from "../lib/design-store.js";
 import {
-  getShops,
+  resolvePublishShop,
   uploadImageBase64,
   createProduct,
   getProduct,
@@ -378,25 +379,26 @@ async function draftDesign(
   };
 }
 
-async function main() {
-  const approved = findApprovedDesigns();
+/**
+ * Drafts every approved design into Printify and writes the Etsy pack.
+ * Shared by `pnpm publish-drafts` (main below) and the full `pnpm pipeline` so both
+ * use the SAME robust path: pinned/Etsy shop selection, draft-index dedup, fan-out
+ * composition safety, stock reconcile and mockups. Returns run stats.
+ */
+export async function publishApproved(): Promise<{ drafted: number; failed: number; skipped: number }> {
+  const allApproved = findApprovedDesigns();
 
-  if (approved.length === 0) {
+  if (allApproved.length === 0) {
     console.log("\n⚠️  No hay diseños aprobados para publicar.");
     console.log("   Revisa diseños primero: pnpm review\n");
-    process.exit(0);
+    return { drafted: 0, failed: 0, skipped: 0 };
   }
 
-  const shops = await getShops();
-  // Prefer the Etsy-linked shop; fall back to first available
-  const shop = shops.find((s) => s.sales_channel === "etsy") ?? shops[0];
-  if (!shop) {
-    console.error("No Printify shop found. Vincula tu tienda en Printify primero.");
-    process.exit(1);
-  }
-  if (shop.sales_channel !== "etsy") {
-    console.warn(`⚠️  Ninguna tienda Etsy vinculada — usando "${shop.title}" (${shop.sales_channel}).`);
-  }
+  // Respect the per-run cap (the draft-index dedup means already-drafted designs are
+  // skipped, so this bounds *new* drafts created in one run).
+  const approved = allApproved.slice(0, getConfig().publishing.max_publish_per_run);
+
+  const shop = await resolvePublishShop(getConfig().publishing.shop_id);
 
   const fanOut = getConfig().publishing.fan_out_products ?? [];
   // A design's artwork is composed for ONE layout: mugs are wide seamless wrap-arounds
@@ -496,11 +498,18 @@ async function main() {
     console.log("  B) O abre el .md del pack y copia-pega título/descripción/tags en Etsy");
   }
   console.log();
+
+  return { drafted: stats.drafted, failed: stats.failed, skipped: stats.skipped };
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Publisher failed:", err);
-    process.exit(1);
-  });
+// Only auto-run when invoked directly (pnpm publish-drafts), not when imported by the pipeline.
+const invokedDirectly =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
+  publishApproved()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Publisher failed:", err);
+      process.exit(1);
+    });
+}
