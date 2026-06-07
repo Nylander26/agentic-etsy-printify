@@ -88,10 +88,11 @@ async function waitForMockups(
 }
 
 /**
- * Curates which mockups Printify pushes to Etsy. Printify renders ~1 mockup per garment
- * COLOR and auto-selects all of them; left alone, a 12-color product would exceed Etsy's
- * 10-photo cap. We wait for the render to settle, then select up to `max` mockups with
- * COLOR diversity (one per color first, default front always included). Returns the count.
+ * Curates which mockups Printify pushes to Etsy. Printify renders one mockup per garment
+ * COLOR (distinct `src`, but all share the full variant_ids list) and auto-selects them
+ * all; left alone, a 12-color product would exceed Etsy's 10-photo cap. We wait for the
+ * render to settle, then keep the default front + distinct colors up to `max`. Returns
+ * the count selected.
  */
 export async function selectDiverseMockups(
   shopId: string,
@@ -101,33 +102,15 @@ export async function selectDiverseMockups(
   const full = await waitForMockups(shopId, productId);
   if (!full.images?.length) return 0;
 
-  // Mockups for one garment color share the same variant_ids. Group by color so the
-  // round-robin spreads the selection across colors instead of stacking one color.
-  const byColor = new Map<string, typeof full.images>();
-  for (const img of full.images) {
-    const key = [...(img.variant_ids ?? [])].sort((a, b) => a - b).join(",") || img.position || "front";
-    if (!byColor.has(key)) byColor.set(key, []);
-    byColor.get(key)!.push(img);
-  }
-
+  // Each src is a different garment-color render. Keep the default front first, then add
+  // distinct srcs until the cap. (We can't group by color — every mockup carries the full
+  // variant_ids list — but distinct srcs already are distinct colors.)
   const selected: string[] = [];
-  // Default mockup first if present
   const def = full.images.find((i) => i.is_default);
   if (def) selected.push(def.src);
-
-  // Round-robin one per color until we hit max (or run out)
-  const queues = [...byColor.values()].map((arr) => [...arr]);
-  while (selected.length < max) {
-    let added = false;
-    for (const q of queues) {
-      const next = q.shift();
-      if (next && !selected.includes(next.src)) {
-        selected.push(next.src);
-        added = true;
-        if (selected.length >= max) break;
-      }
-    }
-    if (!added) break;
+  for (const img of full.images) {
+    if (selected.length >= max) break;
+    if (!selected.includes(img.src)) selected.push(img.src);
   }
 
   await updateMockupSelection(shopId, productId, selected);
