@@ -56,6 +56,17 @@ function getDb(): Database.Database {
       revenue     REAL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS sales_snapshots (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      checked_at      TEXT NOT NULL,
+      printify_id     TEXT NOT NULL,
+      design_id       TEXT,
+      niche           TEXT,
+      title           TEXT,
+      units           INTEGER DEFAULT 0,
+      revenue         REAL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS pipeline_runs (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       started_at  TEXT NOT NULL,
@@ -178,6 +189,51 @@ export function savePublishedProduct(
     price,
     new Date().toISOString()
   );
+}
+
+// ── Sales snapshots (post-publication feedback loop) ────────────────────────────
+
+export interface SalesRow {
+  printifyId: string;
+  designId: string | null;
+  niche: string | null;
+  title: string | null;
+  units: number;
+  revenue: number;
+}
+
+/** Persists one snapshot per product so sales trends over time are queryable. */
+export function recordSalesSnapshot(rows: SalesRow[]): void {
+  const db = getDb();
+  const checkedAt = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO sales_snapshots (checked_at, printify_id, design_id, niche, title, units, revenue)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction((items: SalesRow[]) => {
+    for (const r of items) {
+      stmt.run(checkedAt, r.printifyId, r.designId, r.niche, r.title, r.units, r.revenue);
+    }
+  });
+  tx(rows);
+}
+
+/** Units sold for a product at the previous snapshot (for delta vs. last check). */
+export function previousUnitsByProduct(): Map<string, number> {
+  const db = getDb();
+  // Second-most-recent checked_at; the most recent is the run we're comparing against.
+  const prev = db
+    .prepare(
+      "SELECT DISTINCT checked_at FROM sales_snapshots ORDER BY checked_at DESC LIMIT 1 OFFSET 1"
+    )
+    .get() as { checked_at: string } | undefined;
+  const map = new Map<string, number>();
+  if (!prev) return map;
+  const rows = db
+    .prepare("SELECT printify_id, units FROM sales_snapshots WHERE checked_at = ?")
+    .all(prev.checked_at) as Array<{ printify_id: string; units: number }>;
+  for (const r of rows) map.set(r.printify_id, r.units);
+  return map;
 }
 
 // ── Pipeline runs ─────────────────────────────────────────────────────────────

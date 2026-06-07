@@ -55,11 +55,16 @@ const EMPTY: MarketplaceSignals = {
   estMonthlyRevenue: null,
   estMonthlySales: null,
   sampledListings: 0,
+  avgRating: null,
+  topRating: null,
   titles: [],
   topTags: [],
 };
 
-// Real schema of automation-lab~etsy-scraper items (verified via inspect-apify.ts).
+// Real schema of automation-lab~etsy-scraper items (verified live via probe-apify-fields.ts).
+// NOTE: the actor exposes NO sales count and NO review count — only `rating` (stars) and
+// `position` (Etsy relevance rank under most_relevant). We derive a weak-but-REAL demand
+// proxy from the top-ranked listings instead of fabricating sales numbers.
 interface EtsyItem {
   listingId?: string;
   name?: string;
@@ -72,6 +77,7 @@ interface EtsyItem {
   onSale?: boolean;
   rating?: number;
   availability?: string;
+  position?: number; // Etsy search rank for this query (1 = top); lower = better-converting
 }
 
 function parsePrice(s: string | undefined): number | null {
@@ -156,19 +162,35 @@ export async function fetchMarketplaceSignals(keyword: string): Promise<Marketpl
       ? ratings.reduce((a, b) => a + b, 0) / ratings.length
       : null;
 
+    // Weak-but-REAL demand proxy: under most_relevant Etsy ranks best-converting
+    // listings first. Average the rating of the TOP-positioned listings — these are
+    // the closest signal to "what's actually selling" the actor gives us. We do NOT
+    // fabricate a sales count (the old rating×10 hack); estMonthlySales stays null.
+    const TOP_N = 10;
+    const topRatings = items
+      .filter((i) => typeof i.rating === "number" && i.rating > 0)
+      .sort((a, b) => (a.position ?? 1e9) - (b.position ?? 1e9))
+      .slice(0, TOP_N)
+      .map((i) => i.rating as number);
+    const topRating = topRatings.length
+      ? topRatings.reduce((a, b) => a + b, 0) / topRatings.length
+      : null;
+
     const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
 
     const signals: MarketplaceSignals = {
       source: "apify",
       // The actor does not expose total listings, so we leave it null and use
-      // the sample (titles/prices/ratings) as the saturation signal instead.
+      // the sample (depth + top-position ratings + prices) as the demand signal instead.
       listingCount: null,
       avgPrice,
       minPrice: prices.length ? Math.min(...prices) : null,
       maxPrice: prices.length ? Math.max(...prices) : null,
       estMonthlyRevenue: null,
-      estMonthlySales: avgRating !== null ? Math.round(avgRating * 10) : null,
+      estMonthlySales: null, // actor has no sales/review data — never fabricate it
       sampledListings: items.length,
+      avgRating,
+      topRating,
       titles,
       topTags: [],
     };

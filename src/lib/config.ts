@@ -79,6 +79,14 @@ const schema = z.object({
     notify_telegram: z.boolean().default(true),
     auto_publish: z.boolean().default(false),
   }),
+  // Post-publication feedback loop thresholds. Sales come from Printify orders
+  // (the only real, programmatic sales signal — Etsy's API is unavailable).
+  monitor: z
+    .object({
+      winner_min_units: z.number().int().min(1).default(3), // >= units sold → winner, scale it
+      loser_window_days: z.number().int().min(1).default(21), // no sales after this age → underperformer
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof schema>;

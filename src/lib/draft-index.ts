@@ -64,3 +64,18 @@ export function recordDraft(entry: Omit<DraftIndexEntry, "draftedAt">): void {
 export function draftedTitles(): Set<string> {
   return new Set(Object.values(load()).map((e) => e.title.trim().toLowerCase()));
 }
+
+/** Every recorded draft — used by the monitor to map Printify orders back to designs/niches. */
+export function allDrafts(): DraftIndexEntry[] {
+  return Object.values(load());
+}
+
+/**
+ * Wipes the index. Call after deleting all products from Printify so the registry
+ * doesn't keep claiming deleted products exist (which would skew the monitor's
+ * "drafted" count and falsely flag deleted items as underperformers).
+ */
+export function clearDraftIndex(): void {
+  _cache = {};
+  persist(_cache);
+}

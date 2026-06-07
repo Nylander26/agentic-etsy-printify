@@ -277,6 +277,56 @@ export async function deleteProduct(shopId: string, productId: string): Promise<
   await http.delete(`/shops/${shopId}/products/${productId}.json`);
 }
 
+// ── Orders (real sales — the post-publication feedback signal) ───────────────────
+
+export interface OrderLineItem {
+  product_id: string;
+  quantity: number;
+  variant_id: number;
+  metadata?: {
+    title?: string;
+    price?: number; // retail price charged to buyer, in cents
+    variant_label?: string;
+    sku?: string;
+  };
+}
+
+export interface PrintifyOrder {
+  id: string;
+  created_at: string;
+  // Printify statuses include: pending, on-hold, checkout, fulfilled, shipped, canceled, ...
+  status: string;
+  total_price?: number; // order total in cents
+  line_items: OrderLineItem[];
+}
+
+interface OrderPage {
+  current_page: number;
+  last_page: number;
+  data: PrintifyOrder[];
+}
+
+/**
+ * Pulls every order for a shop (paginated). These are REAL sales — the only
+ * trustworthy, programmatic sales signal we have (Etsy's API is unavailable),
+ * so the monitor / feedback loop is built on top of this.
+ */
+// NOTE: Printify caps the orders page size at 10 (unlike products, which allows 100).
+// Passing limit>10 returns HTTP 400.
+export async function getOrders(shopId: string, limit = 10): Promise<PrintifyOrder[]> {
+  const all: PrintifyOrder[] = [];
+  let page = 1;
+  for (;;) {
+    const res = await http.get<OrderPage>(
+      `/shops/${shopId}/orders.json?limit=${limit}&page=${page}`
+    );
+    all.push(...(res.data.data ?? []));
+    if (page >= (res.data.last_page ?? 1)) break;
+    page++;
+  }
+  return all;
+}
+
 /**
  * Enables Etsy's "Personalize" option on a product so buyers can submit custom text.
  * Printify stores this under `sales_channel_properties.personalisation` (British spelling).

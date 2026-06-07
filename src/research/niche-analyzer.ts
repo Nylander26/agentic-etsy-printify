@@ -1,4 +1,5 @@
 import { generateJSON } from "../lib/gemini.js";
+import { getConfig } from "../lib/config.js";
 import { competitionFromListings } from "./apify-source.js";
 import type { NicheData, NicheAnalysis, DesignIdea } from "./types.js";
 
@@ -15,22 +16,27 @@ interface GeminiNicheResponse {
 const ANALYSIS_PROMPT = (data: NicheData) => {
   const m = data.marketplace;
   const hasMarketplace = m.source !== "none";
+  const allowedProducts = getConfig().generation.products;
+  const productEnum = allowedProducts.map((p) => `"${p}"`).join(" | ");
   const marketplaceBlock = hasMarketplace
     ? `
-Marketplace signals (source: ${m.source}, keyword "${data.keyword}"):
-- Total Etsy listings: ${m.listingCount ?? "unknown"}
+REAL marketplace signals (source: ${m.source}, keyword "${data.keyword}" — live Etsy sample):
+- Listings returned for this term: ${m.sampledListings} (full page ≈ active, monetized term; few ≈ thin demand)
 - Price range: ${m.minPrice !== null ? `$${m.minPrice.toFixed(2)} - $${m.maxPrice?.toFixed(2)}` : "unknown"}
 - Avg price: ${m.avgPrice !== null ? `$${m.avgPrice.toFixed(2)}` : "unknown"}
-- Est. monthly revenue per top listing: ${m.estMonthlyRevenue !== null ? `$${m.estMonthlyRevenue.toFixed(0)}` : "unknown"}
-- Est. monthly sales per top listing: ${m.estMonthlySales ?? "unknown"}
-- Top listings (${m.sampledListings} sampled):
+- Avg rating across sample: ${m.avgRating !== null ? `${m.avgRating.toFixed(2)}★` : "unknown"}
+- Top-ranked listings rating (Etsy relevance order = weak proxy for what sells): ${m.topRating !== null ? `${m.topRating.toFixed(2)}★` : "unknown"}
+- Top listings sampled:
 ${m.titles.slice(0, 8).map((t) => `  • ${t}`).join("\n") || "  (none)"}
-- Popular tags: ${m.topTags.slice(0, 10).join(", ") || "(none)"}
 
-Trust the marketplace data above as ground truth for demand visibility and pricing.`
+IMPORTANT — the scraper exposes NO sales count and NO review count for this niche.
+Do NOT invent or estimate sales figures from prior knowledge. Base demandScore ONLY on the
+REAL signals above: how many listings the term returns (depth), the rating of the top-ranked
+listings, and the price spread. If these signals are weak/ambiguous, return a conservative
+demandScore (4-6), not an optimistic guess.`
     : `
-Marketplace signals: NOT AVAILABLE (no APIFY_TOKEN configured).
-Estimate competition and pricing from your training knowledge of the Etsy POD market.`;
+Marketplace signals: NOT AVAILABLE (no APIFY_TOKEN / no data).
+Return a conservative midpoint demandScore (5) and flag low confidence — do not fabricate demand.`;
 
   return `
 You are an Etsy POD (print-on-demand) market analyst.
@@ -40,18 +46,19 @@ ${marketplaceBlock}
 
 Respond ONLY with valid JSON:
 {
-  "demandScore": <1-10, weigh avgInterest + trajectory + marketplace revenue>,
-  "competitionScore": <1-10, derive from listing count: <1k=2, <20k=5, <100k=7, <500k=8, >1M=10>,
+  "demandScore": <1-10, grounded ONLY in the REAL marketplace signals above — never in training priors about sales volume>,
+  "competitionScore": <1-10, infer from sample depth + how generic/saturated the top titles look>,
   "avgPrice": <USD, prefer scraped avg if available, otherwise estimate>,
-  "estimatedMonthlySales": <realistic monthly sales for a NEW shop entering this niche>,
+  "estimatedMonthlySales": <leave as 0 — no real sales data is available; do not guess>,
   "subNiches": [<3-5 specific, less-saturated sub-niches>],
   "designIdeas": [
-    { "concept": "<specific design idea>", "style": "<visual style>", "targetProduct": "tshirt" | "mug" | "poster" }
+    { "concept": "<specific design idea>", "style": "<visual style>", "targetProduct": ${productEnum} }
   ],
   "seoKeywords": [<8-12 long-tail keywords, max 20 chars each, Etsy-friendly>]
 }
 
-Design ideas must be concrete (e.g. "Cat wearing sunglasses with 'Cat Dad' text", not "funny cat design"). Include >=3 ideas mixing products.
+Generate AT LEAST 5 concrete design ideas, ALL with targetProduct in [${productEnum}].
+Ideas must be specific (e.g. "Dad in sunglasses grilling with 'Grillfather' text", not "funny dad design").
 `;
 };
 
@@ -84,7 +91,8 @@ export async function analyzeNiche(data: NicheData): Promise<NicheAnalysis> {
     demandScore,
     competitionScore,
     avgPrice,
-    estimatedMonthlySales: m.estMonthlySales ?? raw.estimatedMonthlySales ?? 0,
+    estimatedMonthlySales: 0, // no real sales/review data from the scraper — never fabricated
+
     subNiches: raw.subNiches ?? [],
     designIdeas: raw.designIdeas ?? [],
     seoKeywords: raw.seoKeywords ?? [],

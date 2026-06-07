@@ -11,8 +11,10 @@ export interface MarketplaceSignals {
   minPrice: number | null;
   maxPrice: number | null;
   estMonthlyRevenue: number | null;   // avg monthly revenue per top listing (USD)
-  estMonthlySales: number | null;     // avg monthly sales per top listing
-  sampledListings: number;
+  estMonthlySales: number | null;     // DEPRECATED: actor exposes no sales/review counts — always null
+  sampledListings: number;            // real depth signal: how many listings the term returns (full page = active term)
+  avgRating: number | null;           // avg star rating across the sample (real field from actor)
+  topRating: number | null;           // avg rating of the top-ranked listings (by Etsy `position` under most_relevant — weak but REAL demand proxy)
   titles: string[];                   // top listing titles for prompt context
   topTags: string[];                  // popular tags for SEO context
 }

@@ -12,48 +12,28 @@ research:
   auto_discover: false
   discovery_window_days: 7        # 7 = weekly, 30 = monthly, 90 = quarterly
   discovery_candidates: 25        # raw trending searches to pull before filtering
+  # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Father's Day US (21-jun),
+  # ventana de compra pico ahora. Probado vivo en el sondeo. Para cambiar de nicho,
+  # reemplaza esta keyword (mantén la lista en 1 para no gastar llamadas Apify de más).
   keywords_seed:
     - "Funny Dad Shirt"
-    - "Best Dad Ever Mug"
-    - "Class of 2026 Graduate"
-    - "Grill Master Dad"
-    - "First Father's Day"
-    - "Girl Dad Apparel"
-    - "Proud Senior Parent"
-    - "Memorial Day USA"
-    - "Summer Vacation Mode"
-    - "Funny Coffee Lover"
-    - "Proud Dog Mom"
-    - "Fishing Dad T-Shirt"
-    - "Dog Dad Gift"
-    - "Future Nurse Grad"
-    - "Graduation Party Decor"
-    - "Patriotic Military Family"
-    - "Lake Life Lover"
-    - "Beach Trip 2026"
-    - "Camping Adventure Shirt"
-    - "BBQ Season Fun"
-    - "Teacher End of Year"
-    - "Plant Mom Gift"
-    - "Last Day of School"
-    - "Mental Health Matters"
-  max_niches: 5
+  max_niches: 1          # calidad > cantidad: 1 nicho × 5 diseños × 3 variaciones = 15 artworks únicos
   min_demand_score: 6
   geo: "US"   # Google Trends region code — kept in sync with market.country
 
 generation:
   designs_per_niche: 5
   products:
-    - tshirt
-    - mug
-    - poster
+    - tshirt                  # 1 solo producto en esta fase — validar ventas antes de fan-out
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
   style_preference: "minimalist, clean vector"
   remove_background: true    # sharp color-key (Windows-safe). Designs must keep a clean white backdrop.
-  # T-shirts: also generate a dedicated, smaller BACK design (complementary logo/tagline) and
-  # print it on the garment back. +1 Gemini image call per tshirt design. The publisher places
-  # front + back print areas on a single product.
-  tshirt_back_design: true
+  # FLAG front/back: con true, cada camiseta genera además un diseño de DORSO dedicado
+  # (logo/tagline complementario) y el publisher coloca áreas de impresión frente+dorso en
+  # un solo producto. Cuesta +1 llamada Gemini por camiseta (duplica el gasto de imágenes).
+  # El código de dorso queda intacto y operativo — solo cambia esta flag para reactivarlo.
+  # false = solo frente (mitad de llamadas, recomendado para primeras corridas / control de costo).
+  tshirt_back_design: false
 
 validator:
   max_regenerations: 2         # hard cap on auto-regenerations per design (prevents infinite loops)
@@ -81,9 +61,7 @@ publishing:
   # Auto-publish each approved design on these extra product types too
   # (the source image is resized to each target's print dimensions on the fly).
   fan_out_products:
-    - tshirt
-    - mug
-    - poster
+    - tshirt                  # sin fan-out a mug/poster en esta fase
   # Etsy personalization. Designs that are personalizable (explicit `personalizable:true`
   # in metadata, or — when auto_detect — inferred from concept/title keywords) are drafted
   # with Etsy's "Personalize" option ON via sales_channel_properties.personalisation, so
@@ -119,3 +97,10 @@ upscaler:
 pipeline:
   notify_telegram: true
   auto_publish: false   # always require manual review before publishing
+
+# Feedback loop post-publicación. Las ventas salen de Printify orders (única señal
+# de ventas real y programática — la API de Etsy no está disponible). `pnpm stats`
+# lee ventas reales, marca ganadores para escalar y perdedores para retirar.
+monitor:
+  winner_min_units: 3      # >= unidades vendidas → ganador, generar más variaciones / expandir productos
+  loser_window_days: 21    # sin ventas pasados estos días desde el draft → bajo rendimiento, considerar retirar
