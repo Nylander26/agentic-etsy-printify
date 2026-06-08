@@ -98,6 +98,15 @@ const schema = z.object({
       loser_window_days: z.number().int().min(1).default(21), // no sales after this age → underperformer
     })
     .default({}),
+  // Asset retention. Generated images under output/ are regenerable intermediates (the
+  // published artwork lives on Printify). Each pipeline run prunes old assets to the last
+  // `keep_runs` runs (a run = a date). Set enabled=false to keep everything.
+  cleanup: z
+    .object({
+      enabled: z.boolean().default(true),
+      keep_runs: z.number().int().min(1).default(3),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof schema>;

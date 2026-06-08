@@ -12,6 +12,7 @@
     "publish-drafts": "tsx src/publisher/index.ts",
     "pipeline": "tsx src/pipeline.ts",
     "stats": "tsx src/monitor/index.ts",
+    "clean": "tsx src/clean.ts",
     "test:apis": "tsx src/test-apis.ts",
     "list:variants": "tsx scripts/list-variants.ts",
     "dedup": "tsx scripts/dedup-drafts.ts",

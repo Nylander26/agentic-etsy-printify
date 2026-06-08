@@ -30,6 +30,7 @@ pnpm run review       # Interactive CLI to approve/reject pre-validated designs
 pnpm run publish      # Creates Printify drafts from approved designs
 pnpm run pipeline     # Full orchestrated run (discover → research → generate → validate → notify → review → publish)
 pnpm run stats        # Weekly dashboard: views, favs, sales per listing
+pnpm run clean        # Prune old regenerable assets (output/ + stale approved) to last keep_runs runs; --apply to delete
 ```
 
 ## Architecture

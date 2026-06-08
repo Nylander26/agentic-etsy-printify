@@ -34,6 +34,7 @@ import {
   markRejected,
 } from "./validator/loop-control.js";
 import { analyzeImage } from "./lib/gemini.js";
+import { cleanupAssets } from "./lib/cleanup.js";
 import { publishApproved } from "./publisher/index.js";
 import type { ProductType, DesignMetadata, NicheContext, ValidationResult } from "./generator/types.js";
 import type { NicheAnalysis, NicheData } from "./research/types.js";
@@ -357,6 +358,15 @@ async function main() {
   console.log("\n🔄 Pipeline iniciando...");
   console.log(`   Mode: ${config.research.auto_discover ? "auto-discovery" : "manual seeds (" + config.research.keywords_seed.join(", ") + ")"}`);
   console.log("═".repeat(60));
+
+  // Prune old regenerable assets (output/ images, stale approved designs) to the last
+  // `keep_runs` runs before generating more. Published artwork lives on Printify.
+  if (config.cleanup.enabled) {
+    const { removed } = cleanupAssets(config.cleanup.keep_runs);
+    if (removed.length > 0) {
+      console.log(`🧹 Limpieza: ${removed.length} carpetas antiguas borradas (keep_runs=${config.cleanup.keep_runs})`);
+    }
+  }
 
   const seeds = await runDiscovery();
   if (seeds.length === 0) {

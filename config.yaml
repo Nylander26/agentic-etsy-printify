@@ -118,3 +118,12 @@ pipeline:
 monitor:
   winner_min_units: 3      # >= unidades vendidas → ganador, generar más variaciones / expandir productos
   loser_window_days: 21    # sin ventas pasados estos días desde el draft → bajo rendimiento, considerar retirar
+
+# Retención de assets. Las imágenes de output/ son intermedios regenerables (el arte
+# publicado vive en Printify). Cada `pnpm pipeline` poda al inicio dejando solo los últimos
+# `keep_runs` runs (un run = una fecha) en output/ y en approved/rejected/pending-review.
+# También borra carpetas output/_archive*. Nunca toca output/.draft-index.json.
+# Comando manual: `pnpm clean` (dry-run) / `pnpm clean --apply`.
+cleanup:
+  enabled: true
+  keep_runs: 3
