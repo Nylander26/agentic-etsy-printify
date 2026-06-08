@@ -68,6 +68,10 @@ Score each dimension 1-10. Anchor descriptions:
 
 4. printability — POD-friendly on ${product}?
    1-3: tiny details/gradients that will print muddy, edges bleed; 4-6: workable with caveats; 7-8: clean for DTG/sublimation; 9-10: bold, high-contrast, scales perfectly.
+   HARD FAIL: if the background is a transparency CHECKERBOARD / grey-and-white grid pattern
+   (the model drew the "transparent" placeholder instead of solid white), set printability = 1
+   and verdict = "rejected" — it prints as a literal checkerboard on colored garments. The
+   backdrop MUST be solid opaque white (or the artwork's own intended fill).
 
 5. overall — weighted average of the above, BUT cap at 5 if any single score is ≤3.
 ${culturalRules}

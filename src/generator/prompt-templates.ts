@@ -85,10 +85,13 @@ Rules:
   leaves, sparkles, dingbats, swooshes — at least 2 types repeated naturally.
 - When text is present, specify the font character (e.g. "thick retro varsity serif",
   "loose cursive script", "chunky bold sans") and pair with accent doodles.
-- For tshirts: always "transparent/white background, single self-contained centered graphic floating
-  as a compact island with clear empty margin on all sides, NO full-bleed background, NO edge-to-edge
-  or repeating pattern, NO background scenery/flags/borders reaching the edges, nothing cut off, no
-  mockup, no garment". A t-shirt print is a contained graphic, NOT a mug wrap or a full-bleed poster.
+- For tshirts: always "SOLID PURE WHITE background (#FFFFFF) — NEVER a transparency
+  checkerboard / grey-and-white grid pattern (an image generator cannot output real
+  transparency; the backdrop must be flat opaque white), single self-contained centered
+  graphic floating as a compact island with clear empty margin on all sides, NO full-bleed
+  background, NO edge-to-edge or repeating pattern, NO background scenery/flags/borders
+  reaching the edges, nothing cut off, no mockup, no garment". A t-shirt print is a
+  contained graphic on white, NOT a mug wrap or a full-bleed poster.
 - For mugs: always "seamless horizontal wrap-around, white background, no distortion"
 - For posters: always "portrait orientation, fine art print, decorative border or framing motifs"
 - AVOID these words: minimalist, simple, clean, plain, basic, flat-only, sterile.
