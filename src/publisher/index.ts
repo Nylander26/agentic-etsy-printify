@@ -233,6 +233,7 @@ async function draftDesign(
     targetNetMargin: pub.target_net_margin,
     freeShipping: pub.free_shipping,
     shippingCost: pub.shipping_cost_usd,
+    offsiteAdsRate: pub.etsy_offsite_ads ? pub.etsy_offsite_ads_rate : 0,
   });
   const priceInCents = Math.round(pricing.suggestedPrice * 100);
 

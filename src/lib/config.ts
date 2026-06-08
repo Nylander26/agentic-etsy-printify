@@ -48,8 +48,10 @@ const schema = z.object({
     // Net-margin pricing: retail = (garment + shipping + Etsy fixed fee) / (1 - etsy_rate - target_net_margin).
     // target_net_margin is profit AFTER garment cost, absorbed shipping (free_shipping) and Etsy fees.
     free_shipping: z.boolean().default(true),
-    shipping_cost_usd: z.number().min(0).max(50).default(4.29),
-    target_net_margin: z.number().min(0.0).max(0.6).default(0.11),
+    shipping_cost_usd: z.number().min(0).max(50).default(4.75),
+    etsy_offsite_ads: z.boolean().default(true),       // bake the off-site ads fee into price
+    etsy_offsite_ads_rate: z.number().min(0).max(0.2).default(0.12), // 12% <$10k/yr, 15% above
+    target_net_margin: z.number().min(0.0).max(0.6).default(0.16),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
     // Max base64 upload body to Printify (MB). Above this, the image is palette-quantized
     // to fit (lossy). Printify's POST body limit is ~10MB; bump if you see needless
