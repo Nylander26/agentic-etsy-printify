@@ -7,8 +7,15 @@
  */
 import { writeFileSync, mkdirSync } from "fs";
 import { fetchMarketplaceSignals } from "./apify-source.js";
+import { fetchPinterestSignals } from "./pinterest-source.js";
 import { analyzeNiche, rankNiches } from "./niche-analyzer.js";
 import { discoverNiches } from "./discovery.js";
+import {
+  preResearchGuard,
+  hasMarketplaceSignal,
+  qualifyNiche,
+  pinterestStatusLabel,
+} from "./niche-filter.js";
 import { askApproval } from "../lib/approval.js";
 import { getConfig } from "../lib/config.js";
 import type { ResearchResult, NicheData } from "./types.js";
@@ -47,7 +54,11 @@ async function resolveSeeds(): Promise<string[]> {
 
     const options = discovered.map((n) => ({
       label: n.keyword,
-      detail: `demand≈${n.expectedDemand}/10 · sample=${n.sampledListings} · ${n.avgPrice !== null ? "$" + n.avgPrice.toFixed(2) : "$?"} · ${n.rationale}`,
+      detail: [
+        n.anchorEvent ? `[${n.anchorEvent}]` : "[evergreen]",
+        `demand≈${n.expectedDemand}/10`,
+        n.rationale.slice(0, 80),
+      ].join(" · "),
     }));
 
     const choice = await askApproval(
@@ -81,24 +92,32 @@ async function main() {
   const cfg = getConfig().research;
   console.log(`\n🔍 Research starting — ${seeds.length} seeds [geo=${cfg.geo}]: ${seeds.join(", ")}\n`);
 
-  // Step 1: For each seed, fetch Etsy marketplace signals via Apify.
-  console.log(`📥 Fetching Apify Etsy signals (market=${getConfig().market.country})...`);
+  // Step 1: For each seed, fetch Etsy + Pinterest signals in sequence (throttled per source).
+  console.log(`📥 Fetching Apify signals (Etsy + Pinterest, market=${getConfig().market.country})...`);
   const nicheData: NicheData[] = [];
   for (const keyword of seeds) {
-    process.stdout.write(`  "${keyword}" — marketplace...`);
+    // Checkpoint 1 (shared): product coherence.
+    const guard = preResearchGuard(keyword);
+    if (!guard.ok) {
+      console.log(`  ⊘ "${keyword}" — descartado: ${guard.reason}`);
+      continue;
+    }
+    process.stdout.write(`  "${keyword}" — Etsy...`);
     const marketplace = await fetchMarketplaceSignals(keyword);
-    const merged: NicheData = { keyword, geo: cfg.geo, marketplace };
-    nicheData.push(merged);
-    console.log(
-      ` ✓ listings=${marketplace.listingCount ?? "?"}, avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}]`
+    process.stdout.write(
+      ` ✓ avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}] | Pinterest...`
     );
+    const pinterest = await fetchPinterestSignals(keyword);
+    console.log(` ✓ ${pinterestStatusLabel(pinterest)}`);
+    nicheData.push({ keyword, geo: cfg.geo, marketplace, pinterest });
   }
 
   // Step 2: Gemini analysis — fed with Etsy marketplace data
   console.log("\n🤖 Analyzing with Gemini Pro...");
   const analyses = [];
   for (const data of nicheData) {
-    if (data.marketplace.source === "none" && data.marketplace.listingCount === null) {
+    // Checkpoint 2 (shared): marketplace presence.
+    if (!hasMarketplaceSignal(data.marketplace)) {
       console.log(`  Skipping "${data.keyword}" — no marketplace signal`);
       continue;
     }
@@ -114,9 +133,13 @@ async function main() {
     }
   }
 
-  // Step 3: Rank + filter by min_demand_score
+  // Step 3: Rank + filter — Checkpoint 3 (shared): demand + visibility qualification.
   const ranked = rankNiches(analyses)
-    .filter((n) => n.demandScore >= cfg.min_demand_score)
+    .filter((n) => {
+      const q = qualifyNiche(n);
+      if (!q.ok) console.log(`  ⊘ "${n.keyword}" — ${q.reason}`);
+      return q.ok;
+    })
     .slice(0, cfg.max_niches);
 
   const result: ResearchResult = {
@@ -131,12 +154,13 @@ async function main() {
 
   // Step 4: Summary
   console.log("\n" + "─".repeat(60));
-  console.log(`📊 Top ${ranked.length} nichos (filtered by demand >= ${cfg.min_demand_score}):\n`);
+  console.log(`📊 Top ${ranked.length} nichos (demand >= ${cfg.min_demand_score} & visibilidad >= ${cfg.min_visibility_score}):\n`);
   ranked.forEach((n, i) => {
+    const pinterestLabel = n.pinterestScore > 0 ? `, pinterest=${n.pinterestScore}/10` : "";
     console.log(
       `  ${i + 1}. "${n.keyword}" — score ${n.score.toFixed(2)} ` +
       `(demand ${n.demandScore}/10, competition ${n.competitionScore}/10, ` +
-      `${n.listingCount?.toLocaleString() ?? "?"} listings, avg $${n.avgPrice.toFixed(2)}, src=${n.marketplaceSource})`
+      `${n.listingCount?.toLocaleString() ?? "?"} listings, avg $${n.avgPrice.toFixed(2)}${pinterestLabel}, src=${n.marketplaceSource})`
     );
     if (n.subNiches.length > 0) {
       console.log(`     Sub-nichos: ${n.subNiches.slice(0, 3).join(", ")}`);

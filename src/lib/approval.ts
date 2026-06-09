@@ -61,8 +61,9 @@ function buildPromptText(title: string, options: ApprovalOption[]): string {
     }),
     "",
     "Responde:",
-    `  • "all"        → procesar todos`,
-    `  • "1,3,5"      → solo esos números`,
+    `  • "1"          → seleccionar uno (recomendado — procesar de a uno)`,
+    `  • "1,3"        → seleccionar varios`,
+    `  • "all"        → todos`,
     `  • "cancel"     → abortar`,
   ];
   return lines.join("\n");
@@ -77,18 +78,21 @@ function buildTelegramText(title: string, options: ApprovalOption[]): string {
     .join("\n");
   return (
     `🔍 <b>${title}</b>\n\n${optsLines}\n\n` +
-    `Responde con: <code>all</code>, <code>1,3,5</code>, o <code>cancel</code>`
+    `Responde con: <code>1</code> (uno), <code>1,3</code> (varios), <code>all</code>, o <code>cancel</code>`
   );
 }
 
 async function askCLI(
   title: string,
   options: ApprovalOption[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  cliRender?: string
 ): Promise<ApprovalChoice | null> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
 
-  console.log("\n" + buildPromptText(title, options) + "\n");
+  // A caller can supply a fully pre-rendered list (colored/aligned) to replace the
+  // default plain rendering. Parsing still uses `options` so indices stay correct.
+  console.log("\n" + (cliRender ?? buildPromptText(title, options)) + "\n");
   process.stdout.write("> ");
 
   return new Promise((resolve) => {
@@ -104,7 +108,7 @@ async function askCLI(
       const parsed = parseReply(line, options.length);
       if (!parsed) {
         console.log("Respuesta inválida. Reintentando...");
-        askCLI(title, options, signal).then(resolve);
+        askCLI(title, options, signal, cliRender).then(resolve);
         return;
       }
       resolve(parsed);
@@ -135,19 +139,21 @@ async function askTelegram(
 
 export async function askApproval(
   title: string,
-  options: ApprovalOption[]
+  options: ApprovalOption[],
+  opts?: { cliRender?: string }
 ): Promise<ApprovalChoice> {
   if (options.length === 0) return { kind: "cancel" };
+  const cliRender = opts?.cliRender;
 
   // If Telegram isn't configured, skip the race — just CLI.
   if (!isTelegramConfigured()) {
     const controller = new AbortController();
-    const result = await askCLI(title, options, controller.signal);
+    const result = await askCLI(title, options, controller.signal, cliRender);
     return result ?? { kind: "cancel" };
   }
 
   const controller = new AbortController();
-  const cliPromise = askCLI(title, options, controller.signal).then(
+  const cliPromise = askCLI(title, options, controller.signal, cliRender).then(
     (r) => ({ via: "cli" as const, result: r })
   );
   const telegramPromise = askTelegram(title, options, controller.signal).then(

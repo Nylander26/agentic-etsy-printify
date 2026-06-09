@@ -62,13 +62,17 @@ Ideas must be specific (e.g. "Dad in sunglasses grilling with 'Grillfather' text
 `;
 };
 
+// pinterestScore is 0 when Pinterest is unavailable — formula degrades to original.
+// Weight 0.5: strong Pinterest (10) adds +5 to numerator, meaningful but not dominant.
 function computeScore(input: {
   demandScore: number;
   competitionScore: number;
   avgPrice: number;
+  pinterestScore: number;
 }): number {
   const marginScore = Math.min(10, input.avgPrice / 5);
-  const raw = (input.demandScore * 2 + marginScore) / input.competitionScore;
+  const pinterestBoost = input.pinterestScore * 0.5;
+  const raw = (input.demandScore * 2 + marginScore + pinterestBoost) / input.competitionScore;
   return isFinite(raw) ? raw : 0;
 }
 
@@ -86,6 +90,9 @@ export async function analyzeNiche(data: NicheData): Promise<NicheAnalysis> {
     parseFloat(String(raw.avgPrice ?? "20").replace(/[^0-9.]/g, "")) || 20;
   const avgPrice = m.avgPrice ?? geminiPrice;
 
+  const pinterestScore = data.pinterest.trendScore;
+  const pinterestAvailable = data.pinterest.source === "apify";
+
   return {
     keyword: data.keyword,
     demandScore,
@@ -99,7 +106,9 @@ export async function analyzeNiche(data: NicheData): Promise<NicheAnalysis> {
     marketplaceSource: m.source,
     listingCount: m.listingCount,
     estMonthlyRevenue: m.estMonthlyRevenue,
-    score: computeScore({ demandScore, competitionScore, avgPrice }),
+    pinterestScore,
+    pinterestAvailable,
+    score: computeScore({ demandScore, competitionScore, avgPrice, pinterestScore }),
   };
 }
 

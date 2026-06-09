@@ -3,10 +3,9 @@
  * Uso: pnpm generate --niche "funny cat quotes" --products tshirt,mug,poster
  *      pnpm generate --from-research          # usa el último research-results/*.json
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { generateAllVariations } from "./image-generator.js";
-import { postProcess } from "./post-processor.js";
+import { generateNicheDesigns } from "./run.js";
 import type { ProductType, DesignMetadata, NicheContext } from "./types.js";
 import type { ResearchResult, NicheAnalysis, DesignIdea } from "../research/types.js";
 
@@ -99,48 +98,15 @@ async function processNiche(
   maxDesigns: number,
   nicheContext?: NicheContext
 ): Promise<DesignMetadata[]> {
-  const outputDir = getOutputDir(niche);
-  const allMetadata: DesignMetadata[] = [];
-  let designIndex = 0;
-
-  // Filter ideas by requested products
-  const filtered = ideas.filter((idea) => products.includes(idea.targetProduct));
-  const toGenerate = filtered.slice(0, maxDesigns);
-
-  console.log(`\n  Nicho: "${niche}" — ${toGenerate.length} conceptos × 3 variaciones`);
-
-  for (const idea of toGenerate) {
-    designIndex++;
-    console.log(`\n  [${designIndex}/${toGenerate.length}] "${idea.concept}" → ${idea.targetProduct}`);
-
-    const generated = await generateAllVariations({
-      niche,
-      concept: idea.concept,
-      style: idea.style,
-      product: idea.targetProduct,
-      outputDir,
-      index: designIndex,
-      ...(nicheContext ? { nicheContext } : {}),
-    });
-
-    // Post-process each generated design
-    for (const meta of generated) {
-      try {
-        const pp = await postProcess(meta);
-        // Point original at the Printify-ready resized image (PNG)
-        meta.files.original = pp.resizedOriginalPath;
-        if (pp.noBgPath) meta.files.noBg = pp.noBgPath;
-        const dir = join(outputDir, meta.id);
-        writeFileSync(join(dir, "metadata.json"), JSON.stringify(meta, null, 2));
-        allMetadata.push(meta);
-      } catch (err) {
-        console.error(`      Post-process error: ${err instanceof Error ? err.message : err}`);
-        allMetadata.push(meta); // keep it even without post-processing
-      }
-    }
-  }
-
-  return allMetadata;
+  // Standalone generation: no SQLite persistence, no dedup hooks — just generate.
+  return generateNicheDesigns({
+    niche,
+    ideas,
+    products,
+    maxDesigns,
+    outputDir: getOutputDir(niche),
+    ...(nicheContext ? { nicheContext } : {}),
+  });
 }
 
 async function main() {

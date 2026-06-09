@@ -17,7 +17,9 @@ const schema = z.object({
     discovery_candidates: z.number().int().min(5).max(100).default(25),
     keywords_seed: z.array(z.string()).default([]),
     max_niches: z.number().int().min(1).max(20),
-    min_demand_score: z.number().min(1).max(10),
+    // Qualification gates (both 0-10). A niche must clear BOTH to reach generation.
+    min_demand_score: z.number().min(1).max(10),       // Gemini demand estimate
+    min_visibility_score: z.number().min(0).max(10).default(7), // Pinterest trend; only enforced when Pinterest data exists
     geo: z.string().default("US"),
   }),
   generation: z.object({

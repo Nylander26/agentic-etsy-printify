@@ -1,7 +1,17 @@
+export interface PinterestSignals {
+  source: "apify" | "none";
+  sampledPins: number;
+  promotedRatio: number | null;   // fraction of promoted (paid) pins (0-1); high = brands spend here
+  medianFollowers: number | null; // median creator follower count; proxy for brand authority in niche
+  titles: string[];               // top pin titles for prompt context
+  trendScore: number;             // 0-10 composite (commercial * 0.6 + authority * 0.4); 0 = no data
+}
+
 export interface NicheData {
   keyword: string;
   geo: string;
   marketplace: MarketplaceSignals; // Etsy marketplace stats (via Apify scraper-as-a-service)
+  pinterest: PinterestSignals;     // Pinterest engagement signal (optional — degrades gracefully)
 }
 
 export interface MarketplaceSignals {
@@ -37,6 +47,8 @@ export interface NicheAnalysis {
   marketplaceSource: "apify" | "none";
   listingCount: number | null;
   estMonthlyRevenue: number | null;
+  pinterestScore: number;        // 0-10 composite Pinterest trend
+  pinterestAvailable: boolean;   // true = real Pinterest data; false = actor failed / no token (don't gate on it)
   score: number;
 }
 

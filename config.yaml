@@ -9,16 +9,21 @@ research:
   # current trending searches in the configured market via Google Trends, filters
   # them through Gemini for POD-relevance, and asks the user (CLI + Telegram) to
   # confirm before generating designs. Set to false to use keywords_seed manually.
-  auto_discover: false
-  discovery_window_days: 7        # 7 = weekly, 30 = monthly, 90 = quarterly
-  discovery_candidates: 25        # raw trending searches to pull before filtering
+  auto_discover: true
+  discovery_window_days: 60       # días de lookahead para el calendario POD (60 = 2 meses, cubre Halloween en Agosto)
+  discovery_candidates: 8         # ~2 por evento del calendario; Gemini propone, 0 llamadas Apify
   # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Father's Day US (21-jun),
   # ventana de compra pico ahora. Probado vivo en el sondeo. Para cambiar de nicho,
   # reemplaza esta keyword (mantén la lista en 1 para no gastar llamadas Apify de más).
   keywords_seed:
     - "Funny Dad Shirt"
   max_niches: 1          # calidad > cantidad: 1 nicho × 5 diseños × 3 variaciones = 15 artworks únicos
-  min_demand_score: 6
+  # Gates de calificación (ambos 0-10) — un nicho debe pasar LOS DOS para llegar a generación.
+  min_demand_score: 7        # alta demanda (estimación Gemini)
+  # Visibilidad social (Pinterest). Solo se aplica cuando HAY dato de Pinterest;
+  # si el actor falla o no hay token, no bloquea (fallback). Solo nichos con alta
+  # demanda Y alta visibilidad llegan a generación.
+  min_visibility_score: 7
   geo: "US"   # Google Trends region code — kept in sync with market.country
 
 generation:

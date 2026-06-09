@@ -20,25 +20,24 @@ import {
   saveDesign,
 } from "./lib/db.js";
 import { fetchMarketplaceSignals } from "./research/apify-source.js";
-import { discoverNiches } from "./research/discovery.js";
+import { fetchPinterestSignals } from "./research/pinterest-source.js";
+import { discoverNiches, selectDiscoveredNiches } from "./research/discovery.js";
+import {
+  preResearchGuard,
+  hasMarketplaceSignal,
+  qualifyNiche,
+  pinterestStatusLabel,
+} from "./research/niche-filter.js";
 import { askApproval } from "./lib/approval.js";
 import { analyzeNiche, rankNiches } from "./research/niche-analyzer.js";
-import { generateAllVariations } from "./generator/image-generator.js";
-import { postProcess } from "./generator/post-processor.js";
-import { buildValidatorPrompt, normalizeValidation } from "./validator/criteria.js";
-import {
-  persistApprovedOrBorderline,
-  handleRejection,
-  promoteToApproved,
-  autoRegenerate,
-  markRejected,
-} from "./validator/loop-control.js";
-import { analyzeImage } from "./lib/gemini.js";
+import { generateNicheDesigns } from "./generator/run.js";
+import { validateDesigns, printValidationSummary, toReviewCount } from "./validator/run.js";
+import type { ValidationStats } from "./validator/run.js";
 import { cleanupAssets } from "./lib/cleanup.js";
 import { publishApproved } from "./publisher/index.js";
-import type { ProductType, DesignMetadata, NicheContext, ValidationResult } from "./generator/types.js";
+import type { ProductType, DesignMetadata, NicheContext } from "./generator/types.js";
 import type { NicheAnalysis, NicheData } from "./research/types.js";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync } from "fs";
 import { join } from "path";
 
 const config = getConfig();
@@ -77,22 +76,17 @@ async function runDiscovery(): Promise<string[]> {
     return [];
   }
 
-  const options = discovered.map((n) => ({
-    label: n.keyword,
-    detail: `demand≈${n.expectedDemand}/10 · sample=${n.sampledListings} · ${n.avgPrice !== null ? "$" + n.avgPrice.toFixed(2) : "$?"} · ${n.rationale}`,
-  }));
-
-  const choice = await askApproval(
-    `Discovery encontró ${discovered.length} nichos para ${config.market.audience}. ¿Cuáles procesamos?`,
-    options
+  // Shared selection gate — identical prompt/parsing as `pnpm discover`.
+  const selected = await selectDiscoveredNiches(
+    `Discovery encontró ${discovered.length} nichos para ${config.market.audience}. ¿Cuál procesamos ahora?`,
+    discovered
   );
 
-  if (choice.kind === "cancel") {
+  if (selected.length === 0) {
     console.log("\n⏹  Pipeline cancelado por el usuario en discovery.");
     return [];
   }
-  if (choice.kind === "all") return discovered.map((n) => n.keyword);
-  return choice.indices.map((i) => discovered[i]?.keyword).filter((k): k is string => !!k);
+  return selected.map((n) => n.keyword);
 }
 
 // ── Phase 1: Research ─────────────────────────────────────────────────────────
@@ -110,16 +104,28 @@ async function runResearch(seeds: string[]): Promise<NicheAnalysis[]> {
       continue;
     }
 
+    // Checkpoint 1 (shared): product coherence — free guard before any API spend.
+    const guard = preResearchGuard(keyword);
+    if (!guard.ok) {
+      console.log(`  ⊘ "${keyword}" — descartado: ${guard.reason}`);
+      continue;
+    }
+
     process.stdout.write(`  Apify marketplace "${keyword}"... `);
     const marketplace = await fetchMarketplaceSignals(keyword);
     console.log(`source=${marketplace.source}, listings=${marketplace.listingCount ?? "?"}`);
 
-    if (marketplace.source === "none" && marketplace.listingCount === null) {
+    // Checkpoint 2 (shared): marketplace presence.
+    if (!hasMarketplaceSignal(marketplace)) {
       console.log(`    → sin señal de marketplace, saltado`);
       continue;
     }
 
-    const data: NicheData = { keyword, geo: config.research.geo, marketplace };
+    process.stdout.write(`  Pinterest "${keyword}"... `);
+    const pinterest = await fetchPinterestSignals(keyword);
+    console.log(pinterestStatusLabel(pinterest));
+
+    const data: NicheData = { keyword, geo: config.research.geo, marketplace, pinterest };
     marketplaceByKeyword.set(keyword, marketplace);
 
     process.stdout.write(`  Analizando con Gemini... `);
@@ -127,11 +133,13 @@ async function runResearch(seeds: string[]): Promise<NicheAnalysis[]> {
       const analysis = await analyzeNiche(data);
       console.log(`score=${analysis.score.toFixed(2)}`);
 
-      if (analysis.demandScore >= config.research.min_demand_score) {
+      // Checkpoint 3 (shared): demand + visibility qualification.
+      const q = qualifyNiche(analysis);
+      if (!q.ok) {
+        console.log(`    → ${q.reason}, descartado`);
+      } else {
         allAnalyses.push(analysis);
         saveNicheAnalysis(keyword, analysis, analysis);
-      } else {
-        console.log(`    → demand score ${analysis.demandScore} < ${config.research.min_demand_score}, descartado`);
       }
     } catch (err) {
       console.error(`FAILED: ${err instanceof Error ? err.message : err}`);
@@ -163,56 +171,54 @@ function buildNicheContext(n: NicheAnalysis): NicheContext {
   };
 }
 
+// ── Confirmation gate (before the expensive generation step) ──────────────────
+
+async function confirmGeneration(niches: NicheAnalysis[]): Promise<NicheAnalysis[]> {
+  console.log(`\n🔎 [1.5/6] Confirmación pre-generación — ${niches.length} nicho(s) calificado(s)`);
+
+  const options = niches.map((n) => ({
+    label: n.keyword,
+    detail: [
+      `score=${n.score.toFixed(2)}`,
+      `demand=${n.demandScore}/10`,
+      `competition=${n.competitionScore}/10`,
+      n.pinterestScore > 0 ? `pinterest=${n.pinterestScore}/10` : "pinterest=n/a",
+      `~${config.generation.designs_per_niche * config.generation.variations_per_design} imágenes`,
+    ].join(" · "),
+  }));
+
+  const choice = await askApproval(
+    `Generar diseños para estos nichos? (la generación de imágenes es el paso costoso)`,
+    options
+  );
+
+  if (choice.kind === "cancel") return [];
+  if (choice.kind === "all") return niches;
+  return choice.indices.map((i) => niches[i]).filter((n): n is NicheAnalysis => n != null);
+}
+
 // ── Phase 2: Generation ───────────────────────────────────────────────────────
 
 async function runGeneration(niches: NicheAnalysis[]): Promise<DesignMetadata[]> {
   console.log(`\n🎨 [2/6] Generación — ${niches.length} nichos`);
+  const products = config.generation.products as ProductType[];
   const allMeta: DesignMetadata[] = [];
-  let designIndex = 0;
 
   for (const niche of niches) {
-    const outputDir = getOutputDir(niche.keyword);
-    const products = config.generation.products as ProductType[];
-    const ideas = niche.designIdeas
-      .filter((idea) => products.includes(idea.targetProduct))
-      .slice(0, config.generation.designs_per_niche);
-    const nicheContext = buildNicheContext(niche);
-
-    console.log(`\n  Nicho: "${niche.keyword}" — ${ideas.length} ideas`);
-
-    for (const idea of ideas) {
-      if (wasDesignGeneratedRecently(niche.keyword, idea.concept, idea.targetProduct, 14)) {
-        console.log(`    ⏭  "${idea.concept}" (${idea.targetProduct}) — ya generado recientemente`);
-        continue;
-      }
-
-      designIndex++;
-      console.log(`    [${designIndex}] "${idea.concept}" → ${idea.targetProduct}`);
-
-      const generated = await generateAllVariations({
-        niche: niche.keyword,
-        concept: idea.concept,
-        style: idea.style,
-        product: idea.targetProduct,
-        outputDir,
-        index: designIndex,
-        nicheContext,
-      });
-
-      for (const meta of generated) {
-        try {
-          const pp = await postProcess(meta);
-          if (pp.noBgPath) {
-            meta.files.noBg = pp.noBgPath;
-            const dir = join(outputDir, meta.id);
-            writeFileSync(join(dir, "metadata.json"), JSON.stringify(meta, null, 2));
-          }
-        } catch { /* keep design even without post-processing */ }
-
-        saveDesign(meta, join(outputDir, meta.id, "metadata.json"));
-        allMeta.push(meta);
-      }
-    }
+    // Shared generation engine — same as `pnpm generate`. Pipeline injects its
+    // SQLite persistence + recent-generation dedup via hooks.
+    const generated = await generateNicheDesigns({
+      niche: niche.keyword,
+      ideas: niche.designIdeas,
+      products,
+      maxDesigns: config.generation.designs_per_niche,
+      outputDir: getOutputDir(niche.keyword),
+      nicheContext: buildNicheContext(niche),
+      shouldSkip: (kw, concept, product) =>
+        wasDesignGeneratedRecently(kw, concept, product, 14),
+      onPersist: (meta, metaPath) => saveDesign(meta, metaPath),
+    });
+    allMeta.push(...generated);
   }
 
   console.log(`\n  ✅ ${allMeta.length} diseños generados`);
@@ -221,100 +227,17 @@ async function runGeneration(niches: NicheAnalysis[]): Promise<DesignMetadata[]>
 
 // ── Phase 3: AI Validation ────────────────────────────────────────────────────
 
-async function runValidation(designs: DesignMetadata[]): Promise<{
-  autoApproved: number;
-  toReview: number;
-  rejected: number;
-  regenerated: number;
-}> {
-  const autoApprove = config.validator.auto_approve_passing;
-  const autoRegen = config.validator.auto_regenerate;
+async function runValidation(designs: DesignMetadata[]): Promise<ValidationStats> {
   console.log(
-    `\n🧠 [3/6] Validación IA — ${designs.length} diseños [modelo=${config.validator.vision_model}, auto_approve=${autoApprove}, auto_regen=${autoRegen}]`
+    `\n🧠 [3/6] Validación IA — ${designs.length} diseños [modelo=${config.validator.vision_model}, auto_approve=${config.validator.auto_approve_passing}, auto_regen=${config.validator.auto_regenerate}]`
   );
 
-  const stats = { autoApproved: 0, review: 0, rejected: 0, regenerated: 0 };
-  const queue = designs.filter((d) => d.status === "pending-validation");
+  // Shared engine — same routing as `pnpm validate`. Pipeline is non-interactive
+  // for rejections: with auto_regenerate off, rejections are marked terminal.
+  const stats = await validateDesigns(designs, { interactive: false });
 
-  // readline only when a rejection could need the interactive menu (auto_regenerate off)
-  const rl = !autoRegen
-    ? readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
-    : null;
-
-  while (queue.length > 0) {
-    const meta = queue.shift() as DesignMetadata;
-    process.stdout.write(`  ${meta.id}... `);
-
-    let verdict: ValidationResult;
-    try {
-      const buf = readFileSync(meta.files.original);
-      const mimeType = meta.files.original.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-      const prompt = buildValidatorPrompt(
-        meta.nicheContext,
-        meta.concept,
-        meta.style,
-        meta.product,
-        meta.variation
-      );
-      const raw = await analyzeImage<Partial<ValidationResult>>(buf.toString("base64"), mimeType, prompt);
-      verdict = normalizeValidation(raw, config.validator.vision_model);
-    } catch (err) {
-      console.log(`ERROR (${err instanceof Error ? err.message : err}) — saltado`);
-      continue;
-    }
-
-    console.log(`${verdict.verdict} (overall ${verdict.scores.overall.toFixed(1)}/10)`);
-
-    // Approved + hybrid review → straight to approved/ (skip manual review)
-    if (verdict.verdict === "approved" && autoApprove) {
-      promoteToApproved(meta, verdict);
-      stats.autoApproved++;
-      continue;
-    }
-    // Approved without auto-approve, or borderline → pending-review (human gate)
-    if (verdict.verdict === "approved" || verdict.verdict === "borderline") {
-      persistApprovedOrBorderline(meta, verdict);
-      stats.review++;
-      continue;
-    }
-    // Rejected
-    if (autoRegen) {
-      const newDesign = await autoRegenerate(meta, verdict);
-      if (newDesign) {
-        stats.regenerated++;
-        queue.push(newDesign);
-      } else {
-        markRejected(meta, verdict);
-        stats.rejected++;
-      }
-      continue;
-    }
-    if (rl) {
-      const action = await handleRejection(meta, verdict, rl);
-      if (action.kind === "regenerate") {
-        stats.regenerated++;
-        queue.push(action.newDesign);
-      } else if (action.kind === "force-approve") {
-        stats.review++;
-      } else {
-        stats.rejected++;
-      }
-      continue;
-    }
-    markRejected(meta, verdict);
-    stats.rejected++;
-  }
-
-  rl?.close();
-  console.log(
-    `  ✅ auto-aprobados: ${stats.autoApproved} | a review: ${stats.review} | rechazados: ${stats.rejected} | regenerados: ${stats.regenerated}`
-  );
-  return {
-    autoApproved: stats.autoApproved,
-    toReview: stats.review,
-    rejected: stats.rejected,
-    regenerated: stats.regenerated,
-  };
+  printValidationSummary(stats);
+  return stats;
 }
 
 // ── Phase 4: Manual Pause ─────────────────────────────────────────────────────
@@ -382,19 +305,29 @@ async function main() {
     stats.nichesFound = niches.length;
 
     if (niches.length === 0) {
-      console.log("\n⚠️  Sin nichos calificados. Ajusta min_demand_score en config.yaml\n");
+      console.log("\n⚠️  Sin nichos calificados. Ajusta min_demand_score / min_visibility_score en config.yaml\n");
       finishPipelineRun(runId, stats);
       return;
     }
 
-    const designs = await runGeneration(niches);
+    // Confirmation gate — image generation is the expensive step. Show the qualified
+    // niches with their scores and let the user drop any before spending on Gemini images.
+    const confirmed = await confirmGeneration(niches);
+    if (confirmed.length === 0) {
+      console.log("\n⏹  Generación cancelada por el usuario.\n");
+      finishPipelineRun(runId, stats);
+      return;
+    }
+
+    const designs = await runGeneration(confirmed);
     stats.designsGenerated = designs.length;
 
     const valStats = await runValidation(designs);
+    const toReview = toReviewCount(valStats);
 
-    if (valStats.toReview > 0) {
+    if (toReview > 0) {
       // Only borderline / force-approved designs need human eyes now.
-      await runPause(niches, valStats.toReview);
+      await runPause(niches, toReview);
     } else {
       console.log("\n⏭  [4/6] Sin diseños borderline — todo auto-aprobado, publicando directo");
       if (valStats.autoApproved === 0) {
