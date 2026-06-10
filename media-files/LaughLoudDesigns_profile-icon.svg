@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <defs>
+    <linearGradient id="profileAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C9A96E"/>
+      <stop offset="100%" stop-color="#D4B87A"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="500" height="500" fill="#0D0D0D"/>
+  
+  <!-- Border -->
+  <rect x="8" y="8" width="484" height="484" fill="none" stroke="#C9A96E" stroke-width="1" opacity="0.3" rx="4"/>
+  
+  <!-- Centered laugh mark icon - larger for icon use -->
+  <g transform="translate(250, 220)">
+    <!-- Eyes -->
+    <line x1="-55" y1="-35" x2="-28" y2="-50" stroke="url(#profileAccent)" stroke-width="6" stroke-linecap="round"/>
+    <line x1="-28" y1="-50" x2="0" y2="-35" stroke="url(#profileAccent)" stroke-width="6" stroke-linecap="round"/>
+    
+    <line x1="28" y1="-35" x2="55" y2="-50" stroke="url(#profileAccent)" stroke-width="6" stroke-linecap="round"/>
+    <line x1="55" y1="-50" x2="82" y2="-35" stroke="url(#profileAccent)" stroke-width="6" stroke-linecap="round"/>
+    
+    <!-- Wide laugh arc -->
+    <path d="M -72 10 Q -36 85 14 85 Q 63 85 100 10" fill="none" stroke="url(#profileAccent)" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  
+  <!-- LL monogram below -->
+  <text x="250" y="400" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="36" font-weight="bold" fill="#EDEDED" letter-spacing="4">LL</text>
+  
+  <!-- Tiny label -->
+  <text x="250" y="435" text-anchor="middle" font-family="'Helvetica Neue', 'Arial', sans-serif" font-size="10" fill="#C9A96E" letter-spacing="6" font-weight="300">DESIGNS</text>
+</svg>

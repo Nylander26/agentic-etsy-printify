@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300">
+  <defs>
+    <linearGradient id="bannerAccent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#B8944F" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#C9A96E"/>
+      <stop offset="70%" stop-color="#C9A96E"/>
+      <stop offset="100%" stop-color="#B8944F" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="goldFull" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C9A96E"/>
+      <stop offset="100%" stop-color="#D4B87A"/>
+    </linearGradient>
+    <pattern id="subtleGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1A1A1A" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="300" fill="#0D0D0D"/>
+  
+  <!-- Subtle texture -->
+  <rect width="1200" height="300" fill="url(#subtleGrid)" opacity="0.4"/>
+  
+  <!-- Top accent line -->
+  <line x1="0" y1="1" x2="1200" y2="1" stroke="url(#bannerAccent)" stroke-width="2"/>
+  
+  <!-- Bottom accent line -->
+  <line x1="0" y1="299" x2="1200" y2="299" stroke="url(#bannerAccent)" stroke-width="2"/>
+
+  <!-- Left decorative element -->
+  <g transform="translate(160, 150)" opacity="0.3">
+    <circle cx="0" cy="0" r="60" fill="none" stroke="#C9A96E" stroke-width="0.8"/>
+    <circle cx="0" cy="0" r="45" fill="none" stroke="#C9A96E" stroke-width="0.5"/>
+  </g>
+
+  <!-- Mini laugh icon on the left -->
+  <g transform="translate(160, 145)" opacity="0.5">
+    <line x1="-18" y1="-12" x2="-9" y2="-17" stroke="#C9A96E" stroke-width="2" stroke-linecap="round"/>
+    <line x1="-9" y1="-17" x2="0" y2="-12" stroke="#C9A96E" stroke-width="2" stroke-linecap="round"/>
+    <line x1="9" y1="-12" x2="18" y2="-17" stroke="#C9A96E" stroke-width="2" stroke-linecap="round"/>
+    <line x1="18" y1="-17" x2="27" y2="-12" stroke="#C9A96E" stroke-width="2" stroke-linecap="round"/>
+    <path d="M -24 3 Q -12 27 5 27 Q 21 27 33 3" fill="none" stroke="#C9A96E" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- Main brand text -->
+  <text x="600" y="135" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="58" font-weight="bold" fill="#EDEDED" letter-spacing="8">LAUGHLOUD</text>
+  
+  <!-- Separator lines -->
+  <line x1="380" y1="162" x2="510" y2="162" stroke="#C9A96E" stroke-width="0.8" opacity="0.5"/>
+  <line x1="690" y1="162" x2="820" y2="162" stroke="#C9A96E" stroke-width="0.8" opacity="0.5"/>
+  
+  <!-- Sub text -->
+  <text x="600" y="190" text-anchor="middle" font-family="'Helvetica Neue', 'Arial', sans-serif" font-size="18" fill="#C9A96E" letter-spacing="14" font-weight="300">D E S I G N S</text>
+
+  <!-- Tagline -->
+  <text x="600" y="235" text-anchor="middle" font-family="'Helvetica Neue', 'Arial', sans-serif" font-size="12" fill="#888888" letter-spacing="5" font-weight="300">UNIQUE DESIGNS THAT MAKE YOU SMILE</text>
+
+  <!-- Right decorative element -->
+  <g transform="translate(1040, 150)" opacity="0.3">
+    <circle cx="0" cy="0" r="60" fill="none" stroke="#C9A96E" stroke-width="0.8"/>
+    <circle cx="0" cy="0" r="45" fill="none" stroke="#C9A96E" stroke-width="0.5"/>
+  </g>
+</svg>
