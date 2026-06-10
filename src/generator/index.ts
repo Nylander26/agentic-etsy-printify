@@ -6,6 +6,7 @@
 import { mkdirSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { generateNicheDesigns } from "./run.js";
+import { budgetReport } from "../lib/budget.js";
 import type { ProductType, DesignMetadata, NicheContext } from "./types.js";
 import type { ResearchResult, NicheAnalysis, DesignIdea } from "../research/types.js";
 
@@ -158,6 +159,7 @@ async function main() {
   console.log(`\n✅ Generación completada:`);
   console.log(`   Total diseños: ${allGenerated.length}`);
   console.log(`   Pendientes de validación IA: ${pending}`);
+  console.log(`   ${budgetReport()}`);
   console.log(`\n   Siguiente paso: pnpm validate\n`);
 }
 

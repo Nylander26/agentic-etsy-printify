@@ -18,6 +18,7 @@ import https from "node:https";
 import { env } from "../lib/env.js";
 import { getConfig } from "../lib/config.js";
 import { readApifyCache, writeApifyCache } from "../lib/apify-cache.js";
+import { charge } from "../lib/budget.js";
 import type { MarketplaceSignals } from "./types.js";
 
 const BASE_URL = "https://api.apify.com/v2";
@@ -103,6 +104,7 @@ export async function fetchMarketplaceSignals(keyword: string): Promise<Marketpl
     return cached;
   }
 
+  charge("apify"); // real (non-cached) scraper call — counts against the run budget
   await throttle();
 
   try {

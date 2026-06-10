@@ -22,6 +22,7 @@ import { getConfig } from "../lib/config.js";
 import { askApproval } from "../lib/approval.js";
 import { colors, scoreBar, padVisible } from "../lib/colors.js";
 import { getUpcomingEvents, eventLabel } from "./calendar.js";
+import { readSalesFeedback, hasSignal, type SalesFeedback } from "../lib/sales-feedback.js";
 import { allowedProductNouns, forbiddenProductNouns, keywordMatchesProducts } from "./product-coherence.js";
 import type { ApprovalOption } from "../lib/approval.js";
 import type { UpcomingEvent, EventUrgency } from "./calendar.js";
@@ -86,9 +87,39 @@ function buildEventBlock(events: UpcomingEvent[]): string {
   return sections.join("\n");
 }
 
+/**
+ * Builds the "what actually sells" prompt block from the sales feedback artifact.
+ * Empty string when there's no real sales signal yet — keeping discovery neutral
+ * pre-launch. Closes the loop: monitor (Printify orders) → discovery proposals.
+ */
+function buildSalesContextBlock(fb: SalesFeedback): string {
+  const cats = Object.entries(fb.categoryUnits)
+    .sort((a, b) => b[1] - a[1])
+    .map(([c, u]) => `${c} (${u} sold)`)
+    .join(", ");
+
+  const topWinners = fb.winners
+    .slice(0, 8)
+    .map((w) => `  • "${w.niche}" — ${w.units} sold${w.category ? ` [${w.category}]` : ""}`)
+    .join("\n");
+
+  return [
+    "REAL SALES FEEDBACK (actual orders from our own Etsy store — the strongest signal):",
+    cats ? `Best-selling categories so far: ${cats}.` : "",
+    "Proven niches (already made sales):",
+    topWinners,
+    "Use this to:",
+    "  - Favor the best-selling categories above when choosing among the calendar events.",
+    "  - For proven niches, propose FRESH adjacent angles / new concepts (NOT the same keyword again).",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function geminiProposePodNiches(
   events: UpcomingEvent[],
-  targetCount: number
+  targetCount: number,
+  salesContext: string
 ): Promise<GeminiCandidate[]> {
   const cfg = getConfig();
   const today = new Date().toISOString().slice(0, 10);
@@ -112,7 +143,7 @@ We currently produce ONLY: ${products.join(", ")}.
 
 UPCOMING US POD PURCHASE WINDOWS
 ${eventBlock}
-
+${salesContext ? `\n${salesContext}\n` : ""}
 YOUR TASK
 Propose exactly ${targetCount} Etsy-searchable POD keyword niches, ALL anchored to the calendar events above.
 Distribute evenly across events, prioritizing CRITICAL and ACTIVE ones (2-3 niches each).
@@ -161,9 +192,23 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
     }
   }
 
+  // Step 1b: Sales feedback (R2) — bias proposals toward what actually sells.
+  // No-op until real Printify orders exist (gated by hasSignal).
+  const salesFeedback = readSalesFeedback();
+  let salesContext = "";
+  if (hasSignal(salesFeedback)) {
+    salesContext = buildSalesContextBlock(salesFeedback);
+    const cats = Object.entries(salesFeedback.categoryUnits)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, u]) => `${c}=${u}u`)
+      .join(", ");
+    console.log(`\n  📈 Sesgo por ventas reales activo — categorías: ${cats || "(ninguna inferida)"}`);
+    console.log(`     ${salesFeedback.winners.length} nicho(s) ganador(es) → se piden variaciones nuevas`);
+  }
+
   // Step 2: Gemini proposes niches anchored to events (0 Apify calls)
   console.log("\n  Gemini proponiendo nichos anclados al calendario...");
-  const rawCandidates = await geminiProposePodNiches(events, targetCount);
+  const rawCandidates = await geminiProposePodNiches(events, targetCount, salesContext);
   console.log(`  ${rawCandidates.length} candidatos propuestos`);
 
   if (rawCandidates.length === 0) {

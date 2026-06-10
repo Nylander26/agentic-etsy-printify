@@ -17,7 +17,9 @@
     "list:variants": "tsx scripts/list-variants.ts",
     "dedup": "tsx scripts/dedup-drafts.ts",
     "find-cropped": "tsx scripts/find-cropped.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc"
   },
   "dependencies": {
@@ -35,7 +37,8 @@
     "@types/node": "^22.15.3",
     "@types/yaml": "^1.9.7",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.8"
   },
   "packageManager": "pnpm@10.29.3",
   "pnpm": {

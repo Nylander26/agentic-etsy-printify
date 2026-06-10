@@ -3,6 +3,7 @@ import { join } from "path";
 import { generateImage } from "../lib/gemini.js";
 import { buildPrompt, buildBackPrompt } from "./prompt-templates.js";
 import { getConfig } from "../lib/config.js";
+import { BudgetExceededError } from "../lib/budget.js";
 import type {
   ProductType,
   VariationKind,
@@ -99,6 +100,7 @@ export async function generateDesign(
   try {
     imageData = await generateImage(prompt, { aspectRatio: PRODUCT_ASPECT_RATIO[input.product] });
   } catch (err) {
+    if (err instanceof BudgetExceededError) throw err; // budget abort must stop the run, not skip silently
     return {
       metadata: {} as DesignMetadata,
       skipped: true,
@@ -121,6 +123,7 @@ export async function generateDesign(
       backPath = join(dir, `back.${backExt}`);
       writeFileSync(backPath, Buffer.from(backImg.base64, "base64"));
     } catch (err) {
+      if (err instanceof BudgetExceededError) throw err;
       console.log(`      (back skipped: ${err instanceof Error ? err.message : err})`);
     }
   }

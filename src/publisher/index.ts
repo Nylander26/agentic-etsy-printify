@@ -25,6 +25,7 @@ import {
 } from "../lib/printify.js";
 import { isDrafted, recordDraft } from "../lib/draft-index.js";
 import { generateSEO } from "./seo.js";
+import { mineCompetitorKeywords } from "./competitor-seo.js";
 import { calculatePrice } from "./pricing.js";
 import { BLUEPRINT_MAP, tshirtVariantsForVariation } from "./blueprint-map.js";
 import { writeEtsyPack, type EtsyPackEntry } from "./etsy-pack.js";
@@ -239,7 +240,18 @@ async function draftDesign(
 
   process.stdout.write("    Generating SEO metadata... ");
   const seoMeta = { ...meta, product: targetProduct };
-  const seo = await generateSEO(seoMeta, [], pricing.suggestedPrice);
+  // R5 — mine proven buyer search terms from the top-ranked competitor titles we already
+  // scraped (nicheContext.topTitles) and feed them into the SEO generation.
+  const competitorKeywords = mineCompetitorKeywords(meta.nicheContext?.topTitles ?? []);
+  if (competitorKeywords.length > 0) {
+    process.stdout.write(`[comp: ${competitorKeywords.slice(0, 5).join(", ")}] `);
+  }
+  const seo = await generateSEO(seoMeta, {
+    nicheKeywords: meta.nicheContext?.topTags ?? [],
+    competitorKeywords,
+    avgNichePrice: meta.nicheContext?.avgPrice ?? pricing.suggestedPrice,
+    price: pricing.suggestedPrice,
+  });
   console.log(`✓ "${seo.title.slice(0, 60)}..."`);
 
   // Print placeholders — front always; add a back placeholder when this is a tshirt with a

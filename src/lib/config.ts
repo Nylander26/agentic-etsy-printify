@@ -29,6 +29,19 @@ const schema = z.object({
     style_preference: z.string().default("minimalist, clean"),
     remove_background: z.boolean().default(false),
     tshirt_back_design: z.boolean().default(false),
+    // Perceptual-hash dedup: after generating each image, drop near-identical designs
+    // (vs the last `compare_runs` runs) BEFORE validating/publishing them — saves the
+    // validator API call and avoids duplicate listings Etsy penalizes.
+    dedup_phash: z
+      .object({
+        enabled: z.boolean().default(true),
+        // Max Hamming distance (out of 64 bits) to treat two images as duplicates.
+        // Lower = stricter (only near-identical match). 0 disables matching.
+        max_distance: z.number().int().min(0).max(64).default(5),
+        // How many recent run-dates to compare against (mirrors cleanup.keep_runs).
+        compare_runs: z.number().int().min(1).default(3),
+      })
+      .default({}),
   }),
   validator: z
     .object({
@@ -92,6 +105,19 @@ const schema = z.object({
     notify_telegram: z.boolean().default(true),
     auto_publish: z.boolean().default(false),
   }),
+  // Per-run spend guard. Tracks estimated cost across Gemini (image/text/vision) +
+  // Apify calls and aborts before a call that would exceed `max_usd_per_run`.
+  // Unit costs are estimates — tune to your actual billing. cap=0 → track only.
+  budget: z
+    .object({
+      enabled: z.boolean().default(true),
+      max_usd_per_run: z.number().min(0).default(10),
+      cost_per_image_usd: z.number().min(0).default(0.04),
+      cost_per_text_usd: z.number().min(0).default(0.002),
+      cost_per_vision_usd: z.number().min(0).default(0.01),
+      cost_per_apify_call_usd: z.number().min(0).default(0.05),
+    })
+    .default({}),
   // Post-publication feedback loop thresholds. Sales come from Printify orders
   // (the only real, programmatic sales signal — Etsy's API is unavailable).
   monitor: z

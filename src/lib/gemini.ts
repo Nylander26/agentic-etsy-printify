@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI, type GenerateContentResult } from "@google/generative-ai";
 import { env } from "./env.js";
 import { getConfig } from "./config.js";
+import { charge } from "./budget.js";
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 const cfg = getConfig();
@@ -10,6 +11,7 @@ const cfg = getConfig();
 const textModel = genAI.getGenerativeModel({ model: cfg.gemini.model_text });
 
 export async function generateText(prompt: string): Promise<string> {
+  charge("text");
   const result: GenerateContentResult = await textModel.generateContent(prompt);
   return result.response.text();
 }
@@ -23,6 +25,7 @@ export async function generateText(prompt: string): Promise<string> {
  * retry once before giving up.
  */
 export async function generateJSON<T>(prompt: string): Promise<T> {
+  charge("text");
   const jsonModel = genAI.getGenerativeModel({
     model: cfg.gemini.model_text,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,6 +83,7 @@ export async function analyzeImage<T>(
   mimeType: string,
   prompt: string
 ): Promise<T> {
+  charge("vision");
   const visionModelName = cfg.validator.vision_model;
   const visionModel = genAI.getGenerativeModel({
     model: visionModelName,
@@ -181,6 +185,7 @@ export async function generateImage(
   prompt: string,
   opts?: ImageGenOptions
 ): Promise<GeneratedImage> {
+  charge("image");
   await waitForImageSlot();
   const result = await imageModel.generateContent(imageRequest(prompt, opts));
   const img = extractImage(result, cfg.gemini.model_image);

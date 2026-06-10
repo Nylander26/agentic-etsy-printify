@@ -39,6 +39,13 @@ generation:
   # El código de dorso queda intacto y operativo — solo cambia esta flag para reactivarlo.
   # false = solo frente (mitad de llamadas, recomendado para primeras corridas / control de costo).
   tshirt_back_design: false
+  # Dedup por perceptual-hash (dHash). Tras generar cada imagen, descarta diseños
+  # casi-idénticos a los de los últimos `compare_runs` runs ANTES de validar/publicar:
+  # ahorra la llamada al validador (Vision) y evita listings duplicados que Etsy penaliza.
+  dedup_phash:
+    enabled: true
+    max_distance: 5      # distancia Hamming (de 64 bits) para considerar duplicado. Menor = más estricto.
+    compare_runs: 3      # cuántos runs (fechas) recientes comparar
 
 validator:
   max_regenerations: 2         # hard cap on auto-regenerations per design (prevents infinite loops)
@@ -116,6 +123,17 @@ upscaler:
 pipeline:
   notify_telegram: true
   auto_publish: false   # always require manual review before publishing
+
+# Guard de presupuesto por run. Rastrea el gasto estimado (imágenes/texto/vision Gemini +
+# llamadas Apify) y aborta ANTES de la llamada que pasaría el tope. Costos unitarios = estimados,
+# ajustá a tu facturación real. max_usd_per_run: 0 = solo rastrear, nunca abortar.
+budget:
+  enabled: true
+  max_usd_per_run: 10.0
+  cost_per_image_usd: 0.04
+  cost_per_text_usd: 0.002
+  cost_per_vision_usd: 0.01
+  cost_per_apify_call_usd: 0.05
 
 # Feedback loop post-publicación. Las ventas salen de Printify orders (única señal
 # de ventas real y programática — la API de Etsy no está disponible). `pnpm stats`

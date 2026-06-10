@@ -18,6 +18,8 @@ import { getShops, getOrders, type PrintifyOrder } from "../lib/printify.js";
 import { allDrafts } from "../lib/draft-index.js";
 import { recordSalesSnapshot, previousUnitsByProduct, type SalesRow } from "../lib/db.js";
 import { getConfig } from "../lib/config.js";
+import { inferPodCategory, type PodCategory } from "../research/calendar.js";
+import { writeSalesFeedback, type WinnerNiche, type SalesFeedback } from "../lib/sales-feedback.js";
 
 /** Derives the niche slug from a design id like "first-father-s-day-001-mug-no-text". */
 function nicheFromDesignId(designId: string): string {
@@ -190,6 +192,44 @@ async function main() {
     }
     if (losers.length > 20) console.log(`   ... y ${losers.length - 20} más`);
     console.log(`   Para retirarlos de Printify (y Etsy): usá scripts/nuke-all-listings.ts o borralos manualmente.`);
+  }
+
+  // ── Feedback loop: persist sales signal for the next discovery run (R2) ─────
+  // Decoupled — discovery reads this JSON, no import back to the monitor. Niches
+  // with real sales (and their inferred POD category) bias future proposals.
+  const winnerNiches: WinnerNiche[] = nichesSorted
+    .filter(([niche, s]) => s.units > 0 && niche !== "(sin nicho)")
+    .map(([niche, s]) => ({
+      niche,
+      units: s.units,
+      revenue: s.revenue,
+      category: inferPodCategory(niche),
+    }));
+
+  const categoryUnits: Partial<Record<PodCategory, number>> = {};
+  for (const w of winnerNiches) {
+    if (w.category) categoryUnits[w.category] = (categoryUnits[w.category] ?? 0) + w.units;
+  }
+
+  const feedback: SalesFeedback = {
+    generatedAt: new Date().toISOString(),
+    totalUnits,
+    winners: winnerNiches,
+    categoryUnits,
+  };
+  const fbPath = writeSalesFeedback(feedback);
+
+  if (totalUnits > 0) {
+    const catStr =
+      Object.entries(categoryUnits)
+        .sort((a, b) => b[1] - a[1])
+        .map(([c, u]) => `${c}=${u}u`)
+        .join(", ") || "(sin categoría inferida)";
+    console.log(`\n🔁 Feedback para discovery guardado en ${fbPath}`);
+    console.log(`   Categorías que venden: ${catStr}`);
+    console.log(`   El próximo 'pnpm discover' / 'pnpm pipeline' sesgará las propuestas hacia esto.`);
+  } else {
+    console.log(`\n🔁 Feedback guardado (sin ventas aún) — discovery sigue neutral hasta que haya órdenes.`);
   }
 
   console.log();

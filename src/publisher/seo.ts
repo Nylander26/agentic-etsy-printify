@@ -18,6 +18,7 @@ const TAXONOMY_IDS = {
 const SEO_PROMPT = (
   meta: DesignMetadata,
   nicheKeywords: string[],
+  competitorKeywords: string[],
   avgNichePrice: number,
   price: number
 ) => `
@@ -30,7 +31,10 @@ Design details:
 - Product: ${meta.product}
 - Price: $${price.toFixed(2)}
 - Competitor avg price: $${avgNichePrice.toFixed(2)}
-- Research keywords: ${nicheKeywords.slice(0, 10).join(", ")}
+- Research keywords: ${nicheKeywords.slice(0, 10).join(", ") || "(none)"}
+- HIGH-FREQUENCY COMPETITOR KEYWORDS (mined from the top-ranked Etsy listings for this
+  niche — these are proven buyer search terms; prioritize matching them in the title and
+  tags WHERE they fit this specific design): ${competitorKeywords.slice(0, 15).join(", ") || "(none)"}
 - Original design brief (what the artwork actually depicts — mine it for buyer search terms):
 """
 ${(meta.prompt ?? "").slice(0, 1200)}
@@ -41,7 +45,7 @@ Write Etsy listing copy that maximizes search visibility and conversion.
 Rules:
 - Title: max 140 chars, start with the most important keyword, natural language
 - Description: minimum 2000 chars, weave keywords naturally, include product details, gift ideas, care instructions. Use line breaks for readability. No markdown headers.
-- Tags: exactly 13 tags, each max 20 chars, use long-tail keywords, no duplicates. Derive tags from the actual subject matter in the design brief AND the niche/research keywords — match how buyers would search for this exact design.
+- Tags: exactly 13 tags, each max 20 chars, use long-tail keywords, no duplicates. Derive tags from the actual subject matter in the design brief, the niche/research keywords, AND the high-frequency competitor keywords above — but only include a competitor term when it genuinely matches this design (no keyword stuffing of irrelevant terms).
 - taxonomyId: use ${TAXONOMY_IDS[meta.product]}
 
 Respond ONLY with valid JSON:
@@ -53,28 +57,34 @@ Respond ONLY with valid JSON:
 }
 `.trim();
 
-function fallbackSEO(meta: DesignMetadata, price: number): EtsySEO {
+function fallbackSEO(meta: DesignMetadata, price: number, competitorKeywords: string[] = []): EtsySEO {
   const productName = meta.product === "tshirt" ? "T-Shirt" : meta.product === "mug" ? "Mug" : "Poster";
   const niche = meta.niche.replace(/\b\w/g, (c) => c.toUpperCase());
   const title = `${niche} ${productName} - ${meta.concept}`.slice(0, 140);
 
   const seedTags = [
     niche,
+    // Lead with mined competitor terms — proven buyer searches, even in the fallback path.
+    ...competitorKeywords.slice(0, 5),
     productName,
     meta.concept.split(" ").slice(0, 3).join(" "),
     `${niche} gift`,
     `${niche} lover`,
-    "etsy bestseller",
     "gift idea",
-    productName.toLowerCase(),
     meta.style.split(",")[0]?.trim() ?? "decorative",
     "print on demand",
-    "custom design",
     `${niche} fan`,
     "unique gift",
   ];
 
-  const tags = seedTags.map((t) => t.slice(0, 20).trim()).filter(Boolean).slice(0, 13);
+  // De-dup (case-insensitive), enforce length, fill to 13.
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const raw of seedTags) {
+    const t = raw.slice(0, 20).trim();
+    if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); tags.push(t); }
+    if (tags.length >= 13) break;
+  }
   while (tags.length < 13) tags.push(productName.toLowerCase());
 
   const description =
@@ -93,36 +103,56 @@ function fallbackSEO(meta: DesignMetadata, price: number): EtsySEO {
   };
 }
 
+export interface SEOInput {
+  /** Niche research keywords (e.g. seoKeywords / topTags). */
+  nicheKeywords?: string[];
+  /** High-frequency keywords mined from top-ranked competitor titles (R5). */
+  competitorKeywords?: string[];
+  avgNichePrice?: number;
+  price?: number;
+}
+
 export async function generateSEO(
   meta: DesignMetadata,
-  nicheKeywords: string[] = [],
-  avgNichePrice = 25,
-  price = 24.99
+  input: SEOInput = {}
 ): Promise<EtsySEO> {
+  const {
+    nicheKeywords = [],
+    competitorKeywords = [],
+    avgNichePrice = 25,
+    price = 24.99,
+  } = input;
+
   let raw: EtsySEO;
   try {
     raw = await generateJSON<EtsySEO>(
-      SEO_PROMPT(meta, nicheKeywords, avgNichePrice, price)
+      SEO_PROMPT(meta, nicheKeywords, competitorKeywords, avgNichePrice, price)
     );
   } catch (err) {
     console.warn(
       `      ⚠ SEO Gemini failed (${err instanceof Error ? err.message : err}) — using fallback`
     );
-    return fallbackSEO(meta, price);
+    return fallbackSEO(meta, price, competitorKeywords);
   }
 
-  // Enforce constraints
+  // Enforce constraints — dedup case-insensitively, cap 20 chars, exactly 13.
   const title = raw.title.slice(0, 140);
 
-  const tags = raw.tags
-    .map((t) => t.slice(0, 20).trim())
-    .filter((t) => t.length > 0)
-    .slice(0, 13);
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  const pushTag = (raw: string): void => {
+    const t = raw.slice(0, 20).trim();
+    if (t && !seen.has(t.toLowerCase()) && tags.length < 13) {
+      seen.add(t.toLowerCase());
+      tags.push(t);
+    }
+  };
 
-  // Pad to 13 if Gemini returned fewer
-  while (tags.length < 13) {
-    tags.push(meta.niche.split(" ")[tags.length % 3] ?? meta.product);
-  }
+  for (const t of raw.tags ?? []) pushTag(t);
+  // Fill any shortfall with mined competitor terms first (proven searches), then niche words.
+  for (const t of competitorKeywords) if (tags.length < 13) pushTag(t);
+  const fillers = [...meta.niche.split(" "), "gift idea", "print on demand", meta.product];
+  for (let i = 0; tags.length < 13; i++) pushTag(fillers[i] ?? `${meta.product} ${i}`);
 
   return {
     title,

@@ -34,6 +34,8 @@ import { generateNicheDesigns } from "./generator/run.js";
 import { validateDesigns, printValidationSummary, toReviewCount } from "./validator/run.js";
 import type { ValidationStats } from "./validator/run.js";
 import { cleanupAssets } from "./lib/cleanup.js";
+import { maybeClearApproved } from "./lib/approved-gate.js";
+import { budgetReport, estimateCost, remainingUsd, budgetEnabled, BudgetExceededError } from "./lib/budget.js";
 import { publishApproved } from "./publisher/index.js";
 import type { ProductType, DesignMetadata, NicheContext } from "./generator/types.js";
 import type { NicheAnalysis, NicheData } from "./research/types.js";
@@ -187,6 +189,24 @@ async function confirmGeneration(niches: NicheAnalysis[]): Promise<NicheAnalysis
     ].join(" · "),
   }));
 
+  // Budget preflight — estimate the image spend and warn if it can't fit under the cap.
+  if (budgetEnabled()) {
+    const totalImages =
+      niches.length * config.generation.designs_per_niche * config.generation.variations_per_design;
+    const estCost = estimateCost("image", totalImages);
+    const headroom = remainingUsd();
+    console.log(
+      `  💰 Estimado: ~${totalImages} imágenes ≈ $${estCost.toFixed(2)} ` +
+        `(disponible este run: $${headroom.toFixed(2)})`
+    );
+    if (estCost > headroom) {
+      console.log(
+        `  ⚠️  La estimación supera el tope del run — la generación se cortará sola al llegar al límite. ` +
+          `Bajá nichos/designs_per_niche o subí budget.max_usd_per_run en config.yaml.`
+      );
+    }
+  }
+
   const choice = await askApproval(
     `Generar diseños para estos nichos? (la generación de imágenes es el paso costoso)`,
     options
@@ -282,6 +302,10 @@ async function main() {
   console.log(`   Mode: ${config.research.auto_discover ? "auto-discovery" : "manual seeds (" + config.research.keywords_seed.join(", ") + ")"}`);
   console.log("═".repeat(60));
 
+  // Designs in approved/ from previous runs are already uploaded to Printify; ask
+  // whether to wipe them before starting (safe default: keep).
+  await maybeClearApproved();
+
   // Prune old regenerable assets (output/ images, stale approved designs) to the last
   // `keep_runs` runs before generating more. Published artwork lives on Printify.
   if (config.cleanup.enabled) {
@@ -345,9 +369,20 @@ async function main() {
     console.log(`   Nichos investigados: ${stats.nichesFound}`);
     console.log(`   Diseños generados:   ${stats.designsGenerated}`);
     console.log(`   Drafts en Printify:  ${stats.designsPublished}`);
+    console.log(`   ${budgetReport()}`);
     console.log();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+
+    // Budget abort is an intentional stop, not a crash — record it, report spend, exit clean.
+    if (err instanceof BudgetExceededError) {
+      finishPipelineRun(runId, { ...stats, error: msg });
+      console.log(`\n⛔ ${msg}`);
+      console.log(`   ${budgetReport()}`);
+      console.log("   Run detenido por el guard de presupuesto. Ajustá budget.max_usd_per_run en config.yaml.\n");
+      return;
+    }
+
     await notifyError("pipeline", msg);
     finishPipelineRun(runId, { ...stats, error: msg });
     console.error("\n❌ Pipeline failed:", msg);

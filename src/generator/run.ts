@@ -6,10 +6,14 @@
  * Pipeline-specific behavior (SQLite persistence, recent-generation dedup) is
  * injected via optional hooks so this module stays free of DB concerns.
  */
-import { writeFileSync } from "fs";
+import { writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { generateAllVariations } from "./image-generator.js";
 import { postProcess } from "./post-processor.js";
+import { getConfig } from "../lib/config.js";
+import { perceptualHash } from "../lib/phash.js";
+import { findSimilar, recordHash } from "../lib/phash-index.js";
+import { BudgetExceededError } from "../lib/budget.js";
 import type { ProductType, DesignMetadata, NicheContext } from "./types.js";
 import type { DesignIdea } from "../research/types.js";
 
@@ -43,6 +47,9 @@ export async function generateNicheDesigns(
 
   console.log(`\n  Nicho: "${p.niche}" — ${ideas.length} conceptos × variaciones`);
 
+  const dedup = getConfig().generation.dedup_phash;
+  const runDate = new Date().toISOString().slice(0, 10);
+
   const all: DesignMetadata[] = [];
   let designIndex = 0;
 
@@ -55,18 +62,48 @@ export async function generateNicheDesigns(
     designIndex++;
     console.log(`    [${designIndex}] "${idea.concept}" → ${idea.targetProduct}`);
 
-    const generated = await generateAllVariations({
-      niche: p.niche,
-      concept: idea.concept,
-      style: idea.style,
-      product: idea.targetProduct,
-      outputDir: p.outputDir,
-      index: designIndex,
-      ...(p.nicheContext ? { nicheContext: p.nicheContext } : {}),
-    });
+    let generated: DesignMetadata[];
+    try {
+      generated = await generateAllVariations({
+        niche: p.niche,
+        concept: idea.concept,
+        style: idea.style,
+        product: idea.targetProduct,
+        outputDir: p.outputDir,
+        index: designIndex,
+        ...(p.nicheContext ? { nicheContext: p.nicheContext } : {}),
+      });
+    } catch (err) {
+      if (err instanceof BudgetExceededError) {
+        console.log(`    ⛔ ${err.message}\n       Detengo la generación; sigo con los ${all.length} diseños ya hechos.`);
+        break;
+      }
+      throw err;
+    }
 
     for (const meta of generated) {
-      const metadataPath = join(p.outputDir, meta.id, "metadata.json");
+      const designDir = join(p.outputDir, meta.id);
+      const metadataPath = join(designDir, "metadata.json");
+
+      // Perceptual-hash dedup — drop a near-identical design BEFORE post-processing,
+      // validating (paid Vision call) or publishing it. Hash the raw generated image
+      // (meta.files.original still points at it here, pre-resize).
+      if (dedup.enabled) {
+        try {
+          const hash = await perceptualHash(readFileSync(meta.files.original));
+          const dup = findSimilar(hash, dedup.max_distance, dedup.compare_runs);
+          if (dup) {
+            console.log(`      ⊘ dup perceptual (dist=${dup.distance} vs "${dup.designId}") — descartado`);
+            rmSync(designDir, { recursive: true, force: true });
+            continue;
+          }
+          recordHash({ hash, designId: meta.id, date: runDate }, dedup.compare_runs);
+        } catch (err) {
+          // Hashing must never block generation — on error, keep the design.
+          console.error(`      pHash error (sigo igual): ${err instanceof Error ? err.message : err}`);
+        }
+      }
+
       try {
         const pp = await postProcess(meta);
         // Point original at the Printify-ready resized image (consistent for all callers).

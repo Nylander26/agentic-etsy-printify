@@ -14,6 +14,16 @@
 
 export type EventUrgency = "critical" | "active" | "upcoming" | "planning";
 
+export type PodCategory = "gift" | "seasonal" | "patriotic" | "humor" | "appreciation";
+
+export const POD_CATEGORIES: PodCategory[] = [
+  "gift",
+  "seasonal",
+  "patriotic",
+  "humor",
+  "appreciation",
+];
+
 export interface UpcomingEvent {
   id: string;
   name: string;
@@ -22,7 +32,7 @@ export interface UpcomingEvent {
   daysUntilWindowClose: number; // negative = window already closed
   urgency: EventUrgency;
   keywords: string[];        // Etsy-friendly POD seed keywords
-  podCategory: "gift" | "seasonal" | "patriotic" | "humor" | "appreciation";
+  podCategory: PodCategory;
 }
 
 interface PodEventDef {
@@ -356,6 +366,65 @@ export function getUpcomingEvents(
       urgencyRank[a.urgency] - urgencyRank[b.urgency] ||
       a.daysUntilEvent - b.daysUntilEvent
   );
+}
+
+// ─── Niche → category inference ───────────────────────────────────────────────
+
+// Generic POD/product words carry no category signal — drop them so matching is
+// driven by the distinctive tokens (dad, cat, halloween, veteran, …).
+const CATEGORY_STOPWORDS = new Set([
+  "shirt", "tee", "tshirt", "t-shirt", "mug", "poster", "gift", "day", "the", "of",
+  "and", "for", "a", "to", "lover", "life", "vibes", "best", "happy", "celebration",
+]);
+
+function tokenize(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1 && !CATEGORY_STOPWORDS.has(t));
+}
+
+// Built once: for each category, the multiset of distinctive tokens drawn from
+// every event's name + seed keywords. A token's weight = how often it appears.
+const CATEGORY_TOKEN_WEIGHTS: Record<PodCategory, Map<string, number>> = (() => {
+  const acc = {
+    gift: new Map<string, number>(),
+    seasonal: new Map<string, number>(),
+    patriotic: new Map<string, number>(),
+    humor: new Map<string, number>(),
+    appreciation: new Map<string, number>(),
+  } satisfies Record<PodCategory, Map<string, number>>;
+
+  for (const def of POD_EVENTS) {
+    const tokens = [def.name, ...def.keywords].flatMap(tokenize);
+    const bucket = acc[def.podCategory];
+    for (const t of tokens) bucket.set(t, (bucket.get(t) ?? 0) + 1);
+  }
+  return acc;
+})();
+
+/**
+ * Best-effort mapping of an arbitrary niche keyword to a POD category, by token
+ * overlap with the calendar's event keywords. Returns null when there's no signal
+ * (e.g. a truly evergreen niche). Used by the sales feedback loop to learn which
+ * categories actually sell.
+ */
+export function inferPodCategory(keyword: string): PodCategory | null {
+  const tokens = tokenize(keyword);
+  if (tokens.length === 0) return null;
+
+  let best: PodCategory | null = null;
+  let bestScore = 0;
+  for (const category of POD_CATEGORIES) {
+    const weights = CATEGORY_TOKEN_WEIGHTS[category];
+    let score = 0;
+    for (const t of tokens) score += weights.get(t) ?? 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = category;
+    }
+  }
+  return best;
 }
 
 /** Human-readable label for an upcoming event (used in prompts and logs) */

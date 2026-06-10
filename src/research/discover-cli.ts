@@ -10,6 +10,7 @@
  */
 import { discoverNiches, selectDiscoveredNiches } from "./discovery.js";
 import { getConfig } from "../lib/config.js";
+import { maybeClearApproved } from "../lib/approved-gate.js";
 
 async function main(): Promise<void> {
   const cfg = getConfig().research;
@@ -19,6 +20,10 @@ async function main(): Promise<void> {
       "    Esta CLI corre discovery de todas formas para que veas qué saldría.\n"
     );
   }
+
+  // Designs in approved/ from previous runs are already uploaded to Printify; ask
+  // whether to wipe them before starting (safe default: keep).
+  await maybeClearApproved();
 
   // ── Discovery ──────────────────────────────────────────────────────────────
   const discovered = await discoverNiches();

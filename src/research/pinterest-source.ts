@@ -20,6 +20,7 @@ import https from "node:https";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { env } from "../lib/env.js";
+import { charge } from "../lib/budget.js";
 import type { PinterestSignals } from "./types.js";
 
 const CACHE_DIR = "cache/pinterest";
@@ -142,6 +143,7 @@ export async function fetchPinterestSignals(keyword: string): Promise<PinterestS
     return cached;
   }
 
+  charge("apify"); // real (non-cached) scraper call — counts against the run budget
   await throttle();
 
   try {
