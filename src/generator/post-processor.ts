@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import type { ProductType, DesignMetadata } from "./types.js";
 import { PRINTIFY_DIMENSIONS } from "./types.js";
+import { compositeTypography } from "./typography.js";
 import { getConfig } from "../lib/config.js";
 
 /**
@@ -134,6 +135,25 @@ export interface PostProcessResult {
   resizedOriginalPath: string;
 }
 
+/**
+ * Composites the design's vector type, if it has any.
+ *
+ * Deliberately the LAST step: the buffer is already at Printify dimensions, so the
+ * glyphs are rasterised straight to press resolution. Doing this any earlier would
+ * feed them through `resizeForPrintify`'s interpolation — the exact softening the
+ * typography path exists to avoid.
+ */
+async function applyTypography(
+  buffer: Buffer,
+  metadata: DesignMetadata
+): Promise<Buffer> {
+  if (!metadata.typography?.lines.length) return buffer;
+
+  const { width, height } = PRINTIFY_DIMENSIONS[metadata.product];
+  process.stdout.write("compositing type... ");
+  return compositeTypography(buffer, metadata.typography, { width, height });
+}
+
 export async function postProcess(
   metadata: DesignMetadata
 ): Promise<PostProcessResult> {
@@ -152,20 +172,22 @@ export async function postProcess(
 
     process.stdout.write("resizing... ");
     const resized = await resizeForPrintify(noBgBuffer, metadata.product);
-    validateResolution(resized, metadata.product);
+    const typeset = await applyTypography(resized, metadata);
+    validateResolution(typeset, metadata.product);
 
     const noBgPath = join(dir, "nobg.png");
-    writeFileSync(noBgPath, resized);
+    writeFileSync(noBgPath, typeset);
     result.noBgPath = noBgPath;
     console.log("✓");
   } else {
     // Mug and poster: just resize, keep white background
     process.stdout.write("      resizing... ");
     const resized = await resizeForPrintify(originalBuffer, metadata.product);
-    validateResolution(resized, metadata.product);
+    const typeset = await applyTypography(resized, metadata);
+    validateResolution(typeset, metadata.product);
 
     const resizedPath = join(dir, "resized.png");
-    writeFileSync(resizedPath, resized);
+    writeFileSync(resizedPath, typeset);
     result.resizedOriginalPath = resizedPath;
     console.log("✓");
   }

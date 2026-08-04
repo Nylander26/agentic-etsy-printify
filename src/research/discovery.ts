@@ -178,13 +178,26 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
   const today = new Date();
   const lookahead = cfg.research.discovery_window_days;
   const targetCount = cfg.research.discovery_candidates;
+  const minLead = cfg.research.min_publish_lead_days;
 
-  console.log(`\nDiscovery — market=${cfg.market.country}, lookahead=${lookahead}d, candidatos=${targetCount}\n`);
+  console.log(
+    `\nDiscovery — market=${cfg.market.country}, lookahead=${lookahead}d, ` +
+      `lead mínimo=${minLead}d, candidatos=${targetCount}\n`
+  );
 
-  // Step 1: Build calendar context
-  const events = getUpcomingEvents(today, lookahead);
+  // Step 1: Build calendar context. Events whose purchase window closes within
+  // `minLead` days are dropped — a listing published into them can't rank in time.
+  const events = getUpcomingEvents(today, lookahead, minLead);
   if (events.length === 0) {
-    console.log("  (sin eventos en la ventana — modo evergreen)");
+    const anyEvent = getUpcomingEvents(today, lookahead).length;
+    if (anyEvent > 0) {
+      console.log(
+        `  (${anyEvent} evento(s) descartados: su ventana cierra en <${minLead}d — ` +
+          `sin runway para rankear → modo evergreen)`
+      );
+    } else {
+      console.log("  (sin eventos en la ventana — modo evergreen)");
+    }
   } else {
     console.log(`  Calendario: ${events.length} eventos en los próximos ${lookahead} días`);
     for (const e of events) {

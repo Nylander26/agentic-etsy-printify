@@ -29,3 +29,5 @@ test-image.png
 .claude/settings.local.json
 # npx-skills creates absolute-path symlinks here — machine-specific, never commit
 .claude/skills/
+# Session handoff notes — working state, not source
+.claude/notes/

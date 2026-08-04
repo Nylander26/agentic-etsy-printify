@@ -2,6 +2,8 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { generateImage } from "../lib/gemini.js";
 import { buildPrompt, buildBackPrompt } from "./prompt-templates.js";
+import { buildTypographySpec } from "./type-director.js";
+import type { TypographySpec } from "./typography.js";
 import { getConfig } from "../lib/config.js";
 import { BudgetExceededError } from "../lib/budget.js";
 import type {
@@ -78,9 +80,22 @@ export async function generateDesign(
 
   mkdirSync(dir, { recursive: true });
 
+  // With vector typography on, the model draws artwork only and leaves the lower band
+  // empty for the composited type. The "no-text" variation is illustration-only by
+  // definition, so it keeps the full canvas and gets no type composited over it.
+  const useTypography =
+    getConfig().generation.typography.enabled && variation !== "no-text";
+
   let prompt: string;
   try {
-    prompt = await buildPrompt(input.concept, input.style, input.product, variation);
+    prompt = await buildPrompt(
+      input.concept,
+      input.style,
+      input.product,
+      variation,
+      true,
+      useTypography
+    );
     // Append validator feedback when regenerating
     if (input.regenerationContext && input.regenerationContext.improvementHints.length > 0) {
       const hints = input.regenerationContext.improvementHints
@@ -128,6 +143,22 @@ export async function generateDesign(
     }
   }
 
+  // Lay out the words while the artwork is already on disk. A failure here degrades
+  // the design to art-only rather than losing an image we have already paid for.
+  let typography: TypographySpec | undefined;
+  if (useTypography) {
+    try {
+      typography = await buildTypographySpec({
+        concept: input.concept,
+        style: input.style,
+        niche: input.niche,
+        variation,
+      });
+    } catch (err) {
+      console.log(`      (type skipped: ${err instanceof Error ? err.message : err})`);
+    }
+  }
+
   const metadata: DesignMetadata = {
     id,
     niche: input.niche,
@@ -140,6 +171,7 @@ export async function generateDesign(
     createdAt: new Date().toISOString(),
     files: { original: originalPath, ...(backPath ? { back: backPath } : {}) },
     regenerationCount: regenCount,
+    ...(typography ? { typography } : {}),
     ...(input.nicheContext ? { nicheContext: input.nicheContext } : {}),
     ...(input.regenerationContext ? { parentDesignId: input.regenerationContext.parentId } : {}),
   };

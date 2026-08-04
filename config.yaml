@@ -1,3 +1,19 @@
+# ─── IDENTIDAD VISUAL — fuente ÚNICA de verdad ────────────────────────────────
+# Antes la marca vivía en dos sitios que se contradecían: laughloud-design-style/SKILL.md
+# pedía oscuro-premium-minimal y los prompts hardcodeados pedían pasteles retro decorativos.
+# Ahora los prompts de arte (prompt-templates.ts) Y la tipografía vectorial
+# (type-director.ts) leen de aquí. Cambiar el look = cambiar este bloque, nada más.
+# Para volver al look retro-decorativo anterior basta reescribir `aesthetic` y `palette`.
+brand:
+  aesthetic: >-
+    dark, premium and intentional; restrained composition where every element earns its
+    place; generous negative space; clever rather than loud
+  avoid: [rainbow, oversaturated, busy pattern, clip art, generic template]
+  # Tintas y acentos. La tipografía elige de aquí y valida contraste contra la prenda.
+  palette: ["#0D0D0D", "#EDEDED", "#C9A96E", "#D4B87A", "#888888", "#F5F0E8"]
+  fonts: [anton, alfa-slab, bebas, pacifico, abril, lato]
+  max_typefaces: 2            # regla dura de la guía de estilo
+
 market:
   country: "US"               # ISO 3166-1 alpha-2 — used by Apify, Trends, validator
   currency: "USD"             # ISO 4217 — expected currency in Apify listings
@@ -12,6 +28,11 @@ research:
   auto_discover: true
   discovery_window_days: 60       # días de lookahead para el calendario POD (60 = 2 meses, cubre Halloween en Agosto)
   discovery_candidates: 8         # ~2 por evento del calendario; Gemini propone, 0 llamadas Apify
+  # Runway mínimo (días) hasta que cierre la ventana de compra de un evento para que valga
+  # la pena sembrarlo. Una listing nueva necesita SEMANAS de impresiones antes de rankear.
+  # Lección de la tanda de Father's Day: publicada 2026-06-08 para el evento del 2026-06-21
+  # (13 días) → nunca rankeó, 1 visita en 2 meses. 0 desactiva el gate.
+  min_publish_lead_days: 30
   # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Father's Day US (21-jun),
   # ventana de compra pico ahora. Probado vivo en el sondeo. Para cambiar de nicho,
   # reemplaza esta keyword (mantén la lista en 1 para no gastar llamadas Apify de más).
@@ -39,6 +60,21 @@ generation:
   # El código de dorso queda intacto y operativo — solo cambia esta flag para reactivarlo.
   # false = solo frente (mitad de llamadas, recomendado para primeras corridas / control de costo).
   tshirt_back_design: false
+  # TIPOGRAFÍA VECTORIAL. Con enabled:true el modelo dibuja SOLO la ilustración (y deja
+  # el tercio inferior vacío) y las palabras se componen aquí desde un .ttf real, ya a
+  # 4500×5400. Dos motivos: (1) Gemini emite 2048px y el resize a medida Printify
+  # interpola ×2.2 — las letras llegan blandas a la prensa; compuestas se rasterizan a
+  # resolución nativa; (2) desaparecen las letras deformes/mal escritas, que son
+  # motivo de auto-rechazo en la guía de estilo. La variación "no-text" no lleva texto
+  # compuesto: sigue siendo solo ilustración.
+  # box_* debe moverse a la vez que el ART_ONLY_SUFFIX de prompt-templates.ts.
+  typography:
+    enabled: true
+    box_top: 0.62        # inicio de la caja de texto (fracción del alto)
+    box_height: 0.30
+    side_margin: 0.10
+    line_gap: 0.05
+    # fuentes y paleta viven en `brand:` — ver arriba del fichero
   # Dedup por perceptual-hash (dHash). Tras generar cada imagen, descarta diseños
   # casi-idénticos a los de los últimos `compare_runs` runs ANTES de validar/publicar:
   # ahorra la llamada al validador (Vision) y evita listings duplicados que Etsy penaliza.
@@ -80,6 +116,12 @@ publishing:
   etsy_offsite_ads_rate: 0.12 # 12% si facturas <$10k/año (15% por encima, obligatorio)
   target_net_margin: 0.16     # ~16% neto medio (14% en 2XL caro, 23% en S barato)
   max_publish_per_run: 25
+  # Cuántas variaciones del MISMO concepto llegan a Etsy. El generador crea 3 tratamientos
+  # (base/dark/no-text) por idea; publicar los 3 crea listings casi idénticas que comparten
+  # tags y se canibalizan (Etsy rara vez muestra 2 listings de la misma tienda por query).
+  # Verificado en LaughLoudDesigns: 14 listings = solo 5 conceptos reales.
+  # 1 = solo la variación mejor validada por concepto.
+  max_variations_per_concept: 1
   # Límite de subida base64 a Printify (MB). Por encima, la imagen se cuantiza (lossy) para
   # entrar. El límite real del body de Printify ronda 10MB. Subilo si ves cuantización
   # innecesaria; bajalo si ves HTTP 413. El upscaler local elimina la necesidad de cuantizar.

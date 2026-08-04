@@ -1,4 +1,5 @@
 import type { ProductType } from "../generator/types.js";
+import { garmentToneForVariation } from "../lib/garment.js";
 
 /**
  * Printify blueprint + print provider defaults.
@@ -69,7 +70,9 @@ const TSHIRT_LIGHT_SET = [
  * "dark" artwork → dark garments; everything else (base/no-text) → light garments.
  */
 export function tshirtVariantsForVariation(variation: string): Array<{ id: number; price: number }> {
-  const ids = variation === "dark" ? TSHIRT_DARK_SET : TSHIRT_LIGHT_SET;
+  // Tone comes from lib/garment so the typography's ink choice and this garment
+  // choice can never drift apart — see the note there.
+  const ids = garmentToneForVariation(variation) === "dark" ? TSHIRT_DARK_SET : TSHIRT_LIGHT_SET;
   return ids.map((id) => ({ id, price: 0 }));
 }
 

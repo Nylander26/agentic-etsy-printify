@@ -296,10 +296,18 @@ const POD_EVENTS: PodEventDef[] = [
  * Returns POD events relevant within the next `lookAheadDays` days,
  * sorted by urgency (critical → active → upcoming → planning)
  * then by daysUntilEvent ascending.
+ *
+ * `minLeadDays` drops events whose purchase window closes too soon to be worth
+ * targeting. A brand-new Etsy listing needs weeks of impressions before it ranks
+ * for anything, so seeding a niche whose buyers stop searching in a few days
+ * produces listings that go live already dead. Learned the hard way: the
+ * Father's Day batch published 2026-06-08 for a 2026-06-21 event never ranked.
+ * 0 disables the gate (previous behavior).
  */
 export function getUpcomingEvents(
   today: Date,
-  lookAheadDays: number
+  lookAheadDays: number,
+  minLeadDays = 0
 ): UpcomingEvent[] {
   const year = today.getFullYear();
   const results: UpcomingEvent[] = [];
@@ -323,8 +331,9 @@ export function getUpcomingEvents(
       const daysUntilClose = daysBetween(today, windowCloseDate);
       const daysUntilOpen = daysBetween(today, windowOpenDate);
 
-      // Skip if window already closed
+      // Skip if window already closed, or closing before a new listing could rank.
       if (daysUntilClose < 0) continue;
+      if (daysUntilClose < minLeadDays) continue;
 
       // Skip if window opens beyond lookahead
       if (daysUntilOpen > lookAheadDays) continue;

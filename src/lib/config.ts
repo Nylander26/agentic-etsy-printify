@@ -3,6 +3,38 @@ import { parse } from "yaml";
 import { z } from "zod";
 
 const schema = z.object({
+  // THE visual identity. Previously the brand lived in two places that disagreed:
+  // laughloud-design-style/SKILL.md described a dark, premium, restrained look while
+  // the hardcoded art prompts asked for bright retro pastels. Prompts and typography
+  // now both read from here, so there is exactly one place to change the look and
+  // nothing can silently drift back apart.
+  brand: z
+    .object({
+      // Injected verbatim into every art prompt and used to steer the optimizer.
+      aesthetic: z
+        .string()
+        .default(
+          "dark, premium and intentional; restrained composition where every element " +
+            "earns its place; generous negative space; clever rather than loud"
+        ),
+      // Words the optimizer must not reach for — they pull the art off-brand.
+      avoid: z
+        .array(z.string())
+        .default(["rainbow", "oversaturated", "busy pattern", "clip art", "generic template"]),
+      // Ink + accent colors. Used for typography and quoted to the art prompt.
+      palette: z
+        .array(z.string().regex(/^#[0-9A-Fa-f]{6}$/, "brand.palette needs 6-digit hex colors"))
+        .min(2)
+        .default(["#0D0D0D", "#EDEDED", "#C9A96E", "#D4B87A", "#888888", "#F5F0E8"]),
+      // Faces the type director may pick from. Keys map to assets/fonts (SIL OFL).
+      fonts: z
+        .array(z.enum(["anton", "alfa-slab", "bebas", "pacifico", "abril", "lato"]))
+        .min(1)
+        .default(["anton", "alfa-slab", "bebas", "pacifico", "abril", "lato"]),
+      // Max distinct typefaces in one design — the style guide's hard rule.
+      max_typefaces: z.number().int().min(1).max(4).default(2),
+    })
+    .default({}),
   market: z
     .object({
       country: z.string().length(2).default("US"),
@@ -15,6 +47,11 @@ const schema = z.object({
     auto_discover: z.boolean().default(false),
     discovery_window_days: z.number().int().min(1).max(180).default(7),
     discovery_candidates: z.number().int().min(5).max(100).default(25),
+    // Minimum runway (days) between today and the close of an event's purchase window
+    // for that event to be worth seeding. A new listing needs weeks of impressions
+    // before Etsy ranks it, so an event closing sooner than this yields listings that
+    // go live already dead. 0 disables the gate.
+    min_publish_lead_days: z.number().int().min(0).max(120).default(30),
     keywords_seed: z.array(z.string()).default([]),
     max_niches: z.number().int().min(1).max(20),
     // Qualification gates (both 0-10). A niche must clear BOTH to reach generation.
@@ -29,6 +66,21 @@ const schema = z.object({
     style_preference: z.string().default("minimalist, clean"),
     remove_background: z.boolean().default(false),
     tshirt_back_design: z.boolean().default(false),
+    // Vector typography: the image model draws the ARTWORK only and the words are
+    // composited from a real font at full print resolution (see generator/typography.ts).
+    // Buys sharp glyphs (no 2048→4500 upscale on letterforms) and kills garbled /
+    // misspelled text, which is an auto-reject trigger in the brand style guide.
+    typography: z
+      .object({
+        enabled: z.boolean().default(true),
+        // Text box as fractions of the canvas. The art prompt is told to leave this
+        // zone empty, so the two must be changed together.
+        box_top: z.number().min(0).max(1).default(0.62),
+        box_height: z.number().min(0.05).max(1).default(0.3),
+        side_margin: z.number().min(0).max(0.4).default(0.1),
+        line_gap: z.number().min(0).max(0.5).default(0.05),
+      })
+      .default({}),
     // Perceptual-hash dedup: after generating each image, drop near-identical designs
     // (vs the last `compare_runs` runs) BEFORE validating/publishing them — saves the
     // validator API call and avoids duplicate listings Etsy penalizes.
@@ -68,6 +120,13 @@ const schema = z.object({
     etsy_offsite_ads_rate: z.number().min(0).max(0.2).default(0.12), // 12% <$10k/yr, 15% above
     target_net_margin: z.number().min(0.0).max(0.6).default(0.16),
     max_publish_per_run: z.number().int().min(1).max(100).default(25),
+    // How many artwork variations of the SAME concept reach Etsy. The generator makes
+    // `generation.variations_per_design` treatments (base/dark/no-text) per idea; drafting
+    // all of them publishes near-duplicate listings that share a tag set and cannibalize
+    // each other in search (Etsy rarely shows two listings from one shop for a query).
+    // 1 = publish only the best-validated variation per concept. Raise only if you
+    // differentiate the SEO per variation.
+    max_variations_per_concept: z.number().int().min(1).max(10).default(1),
     // Max base64 upload body to Printify (MB). Above this, the image is palette-quantized
     // to fit (lossy). Printify's POST body limit is ~10MB; bump if you see needless
     // quantization, lower if you see HTTP 413.

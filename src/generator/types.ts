@@ -1,3 +1,5 @@
+import type { TypographySpec } from "./typography.js";
+
 export type ProductType = "tshirt" | "mug" | "poster";
 
 export type VariationKind = "base" | "dark" | "no-text" | "minimal";
@@ -62,6 +64,10 @@ export interface DesignMetadata {
   parentDesignId?: string;            // when this is a regeneration of another design
   forceApproved?: boolean;            // user overrode a "rejected" verdict
   personalizable?: boolean;           // design accepts buyer custom text → enable Etsy "Personalize"
+  // Vector text composited over the artwork at print resolution. Absent when the
+  // design carries no words (the "no-text" variation) or typography is disabled,
+  // in which case whatever the image model drew is what ships.
+  typography?: TypographySpec;
 }
 
 // Printify minimum dimensions per product type

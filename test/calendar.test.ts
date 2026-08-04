@@ -40,6 +40,30 @@ describe("getUpcomingEvents — date math", () => {
     expect(xmasThisYear).toBeUndefined();
   });
 
+  it("drops events whose purchase window closes inside the publish lead time", () => {
+    // 2026-06-08 — the day the Father's Day batch actually went live. The event is
+    // June 21, so the window closes days later: no runway for a new listing to rank.
+    const publishedOn = new Date(2026, 5, 8);
+
+    const withoutGate = getUpcomingEvents(publishedOn, 60).find((e) => e.id === "fathers-day");
+    expect(withoutGate).toBeDefined();
+
+    const withGate = getUpcomingEvents(publishedOn, 60, 30).find((e) => e.id === "fathers-day");
+    expect(withGate).toBeUndefined();
+  });
+
+  it("keeps events that still have enough runway", () => {
+    // Early August: Halloween's window closes far enough out to be worth seeding.
+    const august = new Date(2026, 7, 4);
+    const halloween = getUpcomingEvents(august, 120, 30).find((e) => e.id === "halloween");
+    expect(halloween).toBeDefined();
+    expect(halloween!.daysUntilWindowClose).toBeGreaterThanOrEqual(30);
+  });
+
+  it("minLeadDays=0 preserves the previous behavior", () => {
+    expect(getUpcomingEvents(today, 400, 0)).toEqual(getUpcomingEvents(today, 400));
+  });
+
   it("sorts by urgency then days-until-event", () => {
     const events = getUpcomingEvents(today, 400);
     const rank = { critical: 0, active: 1, upcoming: 2, planning: 3 } as const;
