@@ -17,6 +17,7 @@ import {
   pinterestStatusLabel,
 } from "./niche-filter.js";
 import { askApproval } from "../lib/approval.js";
+import { apifyEnabled, APIFY_OFF_LABEL } from "../lib/apify.js";
 import { getConfig } from "../lib/config.js";
 import type { ResearchResult, NicheData } from "./types.js";
 
@@ -105,7 +106,9 @@ async function main() {
     process.stdout.write(`  "${keyword}" — Etsy...`);
     const marketplace = await fetchMarketplaceSignals(keyword);
     process.stdout.write(
-      ` ✓ avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}] | Pinterest...`
+      apifyEnabled()
+        ? ` ✓ avg=$${marketplace.avgPrice?.toFixed(2) ?? "?"} [${marketplace.source}] | Pinterest...`
+        : ` ${APIFY_OFF_LABEL} | Pinterest...`
     );
     const pinterest = await fetchPinterestSignals(keyword);
     console.log(` ✓ ${pinterestStatusLabel(pinterest)}`);

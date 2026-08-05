@@ -45,6 +45,12 @@ const schema = z.object({
     .default({}),
   research: z.object({
     auto_discover: z.boolean().default(false),
+    // Master switch for every paid Apify call (Etsy marketplace sample + Pinterest
+    // visibility). Off since the subscription was cancelled — the code stays in place
+    // and working, it simply is never reached. Flip to true and the old behavior
+    // returns with no other change. Keyword validation now happens out-of-band via
+    // the EverBee MCP before a keyword is written into `keywords_seed`.
+    use_apify: z.boolean().default(false),
     discovery_window_days: z.number().int().min(1).max(180).default(7),
     discovery_candidates: z.number().int().min(5).max(100).default(25),
     // Minimum runway (days) between today and the close of an event's purchase window

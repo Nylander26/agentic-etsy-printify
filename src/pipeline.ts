@@ -21,6 +21,7 @@ import {
 } from "./lib/db.js";
 import { fetchMarketplaceSignals } from "./research/apify-source.js";
 import { fetchPinterestSignals } from "./research/pinterest-source.js";
+import { apifyEnabled, APIFY_OFF_LABEL } from "./lib/apify.js";
 import { discoverNiches, selectDiscoveredNiches } from "./research/discovery.js";
 import {
   preResearchGuard,
@@ -113,9 +114,13 @@ async function runResearch(seeds: string[]): Promise<NicheAnalysis[]> {
       continue;
     }
 
-    process.stdout.write(`  Apify marketplace "${keyword}"... `);
+    process.stdout.write(`  Marketplace "${keyword}"... `);
     const marketplace = await fetchMarketplaceSignals(keyword);
-    console.log(`source=${marketplace.source}, listings=${marketplace.listingCount ?? "?"}`);
+    console.log(
+      apifyEnabled()
+        ? `source=${marketplace.source}, listings=${marketplace.listingCount ?? "?"}`
+        : APIFY_OFF_LABEL
+    );
 
     // Checkpoint 2 (shared): marketplace presence.
     if (!hasMarketplaceSignal(marketplace)) {
@@ -189,16 +194,31 @@ async function confirmGeneration(niches: NicheAnalysis[]): Promise<NicheAnalysis
     ].join(" · "),
   }));
 
-  // Budget preflight — estimate the image spend and warn if it can't fit under the cap.
+  // Budget preflight. This used to price the images only, so the number shown at the
+  // approval gate was the floor, not the cost: every design also gets a Vision call, and
+  // with auto_regenerate a rejected one is re-imaged AND re-validated up to the cap.
   if (budgetEnabled()) {
     const totalImages =
       niches.length * config.generation.designs_per_niche * config.generation.variations_per_design;
-    const estCost = estimateCost("image", totalImages);
+    const regensPerDesign = config.validator.auto_regenerate ? config.validator.max_regenerations : 0;
+    const worstCaseImages = totalImages * (1 + regensPerDesign);
+    const worstCaseVision = worstCaseImages; // one validation per image produced
+
+    const estCost = estimateCost("image", totalImages) + estimateCost("vision", totalImages);
+    const worstCost = estimateCost("image", worstCaseImages) + estimateCost("vision", worstCaseVision);
     const headroom = remainingUsd();
     console.log(
-      `  💰 Estimado: ~${totalImages} imágenes ≈ $${estCost.toFixed(2)} ` +
-        `(disponible este run: $${headroom.toFixed(2)})`
+      `  💰 Estimado: ${totalImages} imágenes + ${totalImages} validaciones ≈ $${estCost.toFixed(2)}` +
+        (regensPerDesign > 0
+          ? ` · peor caso con ${regensPerDesign} regeneración(es)/diseño ≈ $${worstCost.toFixed(2)}`
+          : "") +
+        ` (disponible este run: $${headroom.toFixed(2)})`
     );
+    if (worstCost > headroom && estCost <= headroom) {
+      console.log(
+        `  ⚠️  El caso base entra, pero las regeneraciones pueden agotar el tope a mitad del run.`
+      );
+    }
     if (estCost > headroom) {
       console.log(
         `  ⚠️  La estimación supera el tope del run — la generación se cortará sola al llegar al límite. ` +

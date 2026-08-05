@@ -21,7 +21,7 @@ const ANALYSIS_PROMPT = (data: NicheData) => {
   const marketplaceBlock = hasMarketplace
     ? `
 REAL marketplace signals (source: ${m.source}, keyword "${data.keyword}" — live Etsy sample):
-- Listings returned for this term: ${m.sampledListings} (full page ≈ active, monetized term; few ≈ thin demand)
+- Listings returned for this term: ${m.sampledListings}
 - Price range: ${m.minPrice !== null ? `$${m.minPrice.toFixed(2)} - $${m.maxPrice?.toFixed(2)}` : "unknown"}
 - Avg price: ${m.avgPrice !== null ? `$${m.avgPrice.toFixed(2)}` : "unknown"}
 - Avg rating across sample: ${m.avgRating !== null ? `${m.avgRating.toFixed(2)}★` : "unknown"}
@@ -29,14 +29,33 @@ REAL marketplace signals (source: ${m.source}, keyword "${data.keyword}" — liv
 - Top listings sampled:
 ${m.titles.slice(0, 8).map((t) => `  • ${t}`).join("\n") || "  (none)"}
 
+HOW TO READ THE LISTING COUNT — this is the part that is easy to get backwards.
+Listing depth measures COMPETITION, not demand. We deliberately search long-tail phrases,
+so a smaller result set is the expected shape of a good niche: it means few sellers, which
+is exactly what a store with no ranking authority needs. Do NOT mark a specific phrase down
+for returning fewer listings than a broad category term would.
+
+- demandScore answers: is there a real, sizeable group of people who would search THIS phrase
+  and buy? Judge it from the size of the buyer identity the phrase names, plus the evidence
+  that money moves here — sellers bothered to list, the prices asked are real retail prices,
+  the titles read like commercial products rather than filler.
+- competitionScore answers: how crowded and how generic is what came back?
+- A genuinely EMPTY result set (0-2 listings, no prices) is different: that is either a dead
+  phrase or one nobody searches. Score demand low there, and only there.
+
 IMPORTANT — the scraper exposes NO sales count and NO review count for this niche.
-Do NOT invent or estimate sales figures from prior knowledge. Base demandScore ONLY on the
-REAL signals above: how many listings the term returns (depth), the rating of the top-ranked
-listings, and the price spread. If these signals are weak/ambiguous, return a conservative
-demandScore (4-6), not an optimistic guess.`
+Do NOT invent or estimate sales figures from prior knowledge.`
     : `
-Marketplace signals: NOT AVAILABLE (no APIFY_TOKEN / no data).
-Return a conservative midpoint demandScore (5) and flag low confidence — do not fabricate demand.`;
+Marketplace signals: NOT COLLECTED for this run.
+
+This is not a gap to compensate for. The keyword was already measured against real Etsy
+search volume and competition before it reached you, and it passed — that decision is made.
+Your job here is the creative half, and it is the half that actually gets used downstream:
+
+- designIdeas is the important output. Spend your effort there.
+- demandScore / competitionScore: return 5. They are not read when there is no sample, and
+  a confident-looking number invented from priors is worse than an honest placeholder.
+- avgPrice: a reasonable US Etsy estimate for this product is fine.`;
 
   return `
 You are an Etsy POD (print-on-demand) market analyst.
@@ -46,8 +65,8 @@ ${marketplaceBlock}
 
 Respond ONLY with valid JSON:
 {
-  "demandScore": <1-10, grounded ONLY in the REAL marketplace signals above — never in training priors about sales volume>,
-  "competitionScore": <1-10, infer from sample depth + how generic/saturated the top titles look>,
+  "demandScore": <1-10, size of the buyer group for THIS phrase + evidence money moves here. Never a training prior about sales volume, and never penalized for the phrase being specific>,
+  "competitionScore": <1-10, how crowded/generic the returned listings look — THIS is where listing depth belongs>,
   "avgPrice": <USD, prefer scraped avg if available, otherwise estimate>,
   "estimatedMonthlySales": <leave as 0 — no real sales data is available; do not guess>,
   "subNiches": [<3-5 specific, less-saturated sub-niches>],

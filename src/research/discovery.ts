@@ -33,8 +33,9 @@ export interface DiscoveredNiche {
   rationale: string;                    // Gemini's justification for this niche
   expectedDemand: number;               // 1-10 from Gemini
   anchorEvent: string | null;           // calendar event that drove this niche (null = evergreen)
-  anchorUrgency: EventUrgency | null;   // urgency of that event (for sorting + UI grouping)
+  anchorUrgency: EventUrgency | null;   // urgency of that event (for UI grouping)
   daysUntilEvent: number | null;        // days until the anchor event
+  runwayDays: number | null;            // days until the purchase window CLOSES — drives ranking
   source: "auto-discovery";
   // Apify fields — NOT populated during discovery (validation happens in research)
   sampledListings: 0;
@@ -53,35 +54,47 @@ interface GeminiDiscoveryResponse {
   candidates: GeminiCandidate[];
 }
 
-// ─── Urgency rank for sorting (lower = more urgent) ───────────────────────────
-const URGENCY_RANK = { critical: 0, active: 1, upcoming: 2, planning: 3 } as const;
+/**
+ * Ranking for the discovery list.
+ *
+ * NOT by urgency. Urgency measures how soon an event's window closes, so ranking by
+ * it recommends whichever event has the LEAST time left — which is how the Father's
+ * Day batch happened: published 13 days before the event, never ranked, 1 visit in
+ * two months. `min_publish_lead_days` filters the hopeless cases, but a candidate
+ * sitting one day above that floor is still nearly hopeless, and urgency-first put it
+ * at the top with a star next to it.
+ *
+ * A brand-new listing needs weeks of impressions before Etsy ranks it, so within the
+ * lookahead window MORE runway is strictly better. Ties break on Gemini's demand
+ * estimate, then on the keyword so the order is stable across runs.
+ *
+ * (Runway can't run away with it: `discovery_window_days` already caps how far out an
+ * event can be, so this never recommends seeding Christmas in January.)
+ */
+export function compareByRunway(a: DiscoveredNiche, b: DiscoveredNiche): number {
+  const ar = a.runwayDays ?? -1;
+  const br = b.runwayDays ?? -1;
+  if (ar !== br) return br - ar;
+  if (a.expectedDemand !== b.expectedDemand) return b.expectedDemand - a.expectedDemand;
+  return a.keyword.localeCompare(b.keyword);
+}
 
 function buildEventBlock(events: UpcomingEvent[]): string {
   if (events.length === 0) return "No upcoming events in this window — propose evergreen niches only.";
 
-  const byUrgency: Record<string, UpcomingEvent[]> = {};
-  for (const e of events) {
-    (byUrgency[e.urgency] ??= []).push(e);
-  }
-
+  // Most runway first — that is the order we want proposals weighted in, and the model
+  // anchors on whatever it reads first.
   const sections: string[] = [];
-
-  const labels: Record<string, string> = {
-    critical: "🔴 CRITICAL — purchase window closing soon (act immediately)",
-    active:   "🟠 ACTIVE — purchase window open right now",
-    upcoming: "🟡 UPCOMING — window opens within 14 days (prepare now)",
-    planning: "🟢 PLANNING — window opens soon (plan ahead)",
-  };
-
-  for (const urgency of ["critical", "active", "upcoming", "planning"] as const) {
-    const group = byUrgency[urgency];
-    if (!group?.length) continue;
-    sections.push(labels[urgency] ?? urgency);
-    for (const e of group) {
-      const kws = e.keywords.map((k) => `"${k}"`).join(", ");
-      sections.push(`  • ${eventLabel(e)} [${e.podCategory}]`);
-      sections.push(`    Keyword seeds: ${kws}`);
-    }
+  for (const e of [...events].sort((a, b) => b.daysUntilWindowClose - a.daysUntilWindowClose)) {
+    const kws = e.keywords.map((k) => `"${k}"`).join(", ");
+    sections.push(
+      `  • ${eventLabel(e)} [${e.podCategory}] — ${e.daysUntilWindowClose} days of runway ` +
+        `before its purchase window closes`
+    );
+    // Shown so the model knows the territory — and explicitly NOT as a menu to copy.
+    // Left as "seeds" it just hands them back reworded, and these are the head terms
+    // a shop with no sales history cannot rank for.
+    sections.push(`    Saturated head terms for this event — DO NOT return these or reworded variants: ${kws}`);
   }
 
   return sections.join("\n");
@@ -144,18 +157,32 @@ We currently produce ONLY: ${products.join(", ")}.
 UPCOMING US POD PURCHASE WINDOWS
 ${eventBlock}
 ${salesContext ? `\n${salesContext}\n` : ""}
+WHO IS ASKING
+A small store with no sales history and no ranking authority. It cannot win a head term.
+It can only win a narrow query where few sellers compete and the buyer knows exactly what
+they want. A listing also needs WEEKS of impressions before Etsy ranks it, so an event with
+more runway is worth more to us than an event people are buying from today.
+
 YOUR TASK
 Propose exactly ${targetCount} Etsy-searchable POD keyword niches, ALL anchored to the calendar events above.
-Distribute evenly across events, prioritizing CRITICAL and ACTIVE ones (2-3 niches each).
+Give the MOST niches to the events with the MOST runway, fewest to the events closing soonest.
 
 RULES
-1. Each keyword must be 2-5 words, Etsy-search-friendly (e.g. "funny dad bbq shirt", "juneteenth freedom shirt").
-2. ${productRule}
-3. Each niche must target the specific buyer identity for its event (gift-givers, celebrants, fans).
+1. Each keyword must be 3-5 words of long-tail search intent — the phrase a specific buyer
+   types, not the category. It must name a concrete buyer identity, relationship, job,
+   hobby or in-joke: "nurse halloween costume shirt", "cat mom witch shirt",
+   "pregnant halloween announcement shirt" — NOT "halloween shirt", "spooky season shirt".
+2. Reject your own candidate if a store with zero sales could not plausibly rank for it,
+   or if it is a listed head term with a word swapped ("tee" for "shirt", "witchy" for "witch").
+3. ${productRule}
 4. Do NOT propose evergreen or non-event niches — every candidate must map to a listed event.
 5. Do NOT propose news/celebrity/election niches.
 6. Sell well to ${cfg.market.audience}: US humor, US holidays, US idioms.
 7. For \`anchorEvent\`: use the event name exactly as listed above. Never null.
+8. \`expectedDemand\` (1-10) rates how many buyers search THAT EXACT phrase. A narrow
+   phrase scoring 5 is a better business than a head term scoring 9 we can never rank for.
+   Use the full range — do not cluster every candidate at 7-8.
+9. \`rationale\`: one sentence naming the buyer and why they buy. No marketing filler.
 
 OUTPUT (strict JSON, no markdown):
 {
@@ -241,7 +268,7 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
     console.log(`  ${candidates.length} candidatos tras filtro de producto`);
   }
 
-  // Step 3: Sort by event urgency then expectedDemand — no Apify here
+  // Step 3: Rank by runway (see compareByRunway) — no Apify here.
   // Apify validation happens in research on the keyword the user selects.
   const niches: DiscoveredNiche[] = candidates.map((c) => {
     const event = c.anchorEvent ? events.find((e) => e.name === c.anchorEvent) : undefined;
@@ -252,6 +279,7 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
       anchorEvent: c.anchorEvent ?? null,
       anchorUrgency: event?.urgency ?? null,
       daysUntilEvent: event?.daysUntilEvent ?? null,
+      runwayDays: event?.daysUntilWindowClose ?? null,
       source: "auto-discovery" as const,
       sampledListings: 0,
       avgPrice: null,
@@ -259,14 +287,7 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
     };
   });
 
-  niches.sort((a, b) => {
-    const aEvent = events.find((e) => e.name === a.anchorEvent);
-    const bEvent = events.find((e) => e.name === b.anchorEvent);
-    const aRank = aEvent ? URGENCY_RANK[aEvent.urgency] : 99;
-    const bRank = bEvent ? URGENCY_RANK[bEvent.urgency] : 99;
-    if (aRank !== bRank) return aRank - bRank;
-    return b.expectedDemand - a.expectedDemand;
-  });
+  niches.sort(compareByRunway);
 
   return niches;
 }
@@ -274,10 +295,10 @@ export async function discoverNiches(): Promise<DiscoveredNiche[]> {
 // ── Shared selection UI (used by both pipeline.runDiscovery and discover-cli) ──
 
 const URGENCY_HEADER: Record<EventUrgency, string> = {
-  critical: "🔴 CRÍTICO — la ventana de compra cierra pronto",
-  active: "🟠 ACTIVO — la gente está comprando AHORA",
-  upcoming: "🟡 PRÓXIMO — la ventana abre en breve (preparar)",
-  planning: "🟢 PLANIFICAR — con tiempo por delante",
+  critical: "🔴 CRÍTICO — la ventana cierra ya: una listing nueva NO llega a rankear",
+  active: "🟠 ACTIVO — se compra ahora, pero queda poco margen para posicionar",
+  upcoming: "🟡 PRÓXIMO — la ventana abre en breve",
+  planning: "🟢 CON MARGEN — tiempo de sobra para que la listing acumule impresiones",
 };
 
 const URGENCY_COLOR: Record<EventUrgency, (s: string | number) => string> = {
@@ -312,10 +333,12 @@ function renderDiscoveryList(niches: DiscoveredNiche[]): string {
     const kw = colors.cyan(padVisible(n.keyword, kwW));
     const bar = scoreBar(n.expectedDemand);
     const demand = `${bar} ${colors.bold(n.expectedDemand)}/10`;
+    // Runway (days until the purchase window closes), not days until the event — runway
+    // is what decides whether a listing published today can still rank in time.
     const eventTag =
       n.anchorEvent && n.anchorUrgency
         ? URGENCY_COLOR[n.anchorUrgency](
-            `${n.anchorEvent}${n.daysUntilEvent != null ? ` · ${n.daysUntilEvent}d` : ""}`
+            `${n.anchorEvent}${n.runwayDays != null ? ` · ${n.runwayDays}d de margen` : ""}`
           )
         : colors.gray("evergreen");
     const star = i === 0 ? "  ⭐" : "";
@@ -328,10 +351,15 @@ function renderDiscoveryList(niches: DiscoveredNiche[]): string {
   const top = niches[0];
   const recLine = top
     ? `  ⭐ ${colors.bold("Recomendado")}: ${colors.cyan(`#1 "${top.keyword}"`)} ` +
-      colors.dim(`(mayor urgencia + demanda estimada)`)
+      colors.dim(
+        top.runwayDays != null
+          ? `(${top.runwayDays}d de margen — el mayor de la lista — + demanda estimada)`
+          : `(demanda estimada)`
+      )
     : "";
   const note = colors.dim(
-    "  Nota: la demanda real solo se confirma publicando — esto prioriza por urgencia de fecha + estimación de Gemini."
+    "  Nota: ordenado por MARGEN (días hasta que cierra la ventana de compra), no por urgencia:\n" +
+      "  una listing nueva necesita semanas de impresiones antes de rankear. La demanda real solo se confirma publicando."
   );
   const replies = [
     "",

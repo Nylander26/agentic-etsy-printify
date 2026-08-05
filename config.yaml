@@ -25,7 +25,21 @@ research:
   # current trending searches in the configured market via Google Trends, filters
   # them through Gemini for POD-relevance, and asks the user (CLI + Telegram) to
   # confirm before generating designs. Set to false to use keywords_seed manually.
-  auto_discover: true
+  # false para este run: la keyword de abajo está validada con datos reales de EverBee
+  # (volumen y competencia medidos), no estimada por Gemini. Discovery propone frases
+  # plausibles pero es CIEGO al orden de palabras, que es lo que decide el volumen:
+  # "pregnant halloween announcement shirt" = 1 búsqueda/mes, "halloween pregnant
+  # announcement shirt" = 158. Mismas palabras. Ponlo en true para volver a proponer.
+  auto_discover: false
+  # Interruptor maestro de TODAS las llamadas de pago a Apify (muestra de Etsy +
+  # visibilidad de Pinterest). Apagado: la suscripción está cancelada. El código de
+  # Apify sigue intacto y operativo — simplemente no se alcanza. Ponlo en true y vuelve
+  # el comportamiento anterior sin tocar nada más.
+  # Qué lo sustituye: el volumen y la competencia de la keyword se miden fuera del
+  # pipeline con el MCP de EverBee ANTES de escribirla en keywords_seed. Con esto en
+  # false, el gate de demanda se omite (no hay muestra sobre la que juzgar) y la
+  # calificación real ya ocurrió aguas arriba.
+  use_apify: false
   discovery_window_days: 60       # días de lookahead para el calendario POD (60 = 2 meses, cubre Halloween en Agosto)
   discovery_candidates: 8         # ~2 por evento del calendario; Gemini propone, 0 llamadas Apify
   # Runway mínimo (días) hasta que cierre la ventana de compra de un evento para que valga
@@ -33,11 +47,25 @@ research:
   # Lección de la tanda de Father's Day: publicada 2026-06-08 para el evento del 2026-06-21
   # (13 días) → nunca rankeó, 1 visita en 2 meses. 0 desactiva el gate.
   min_publish_lead_days: 30
-  # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Father's Day US (21-jun),
-  # ventana de compra pico ahora. Probado vivo en el sondeo. Para cambiar de nicho,
-  # reemplaza esta keyword (mantén la lista en 1 para no gastar llamadas Apify de más).
+  # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Solo se usa cuando
+  # auto_discover=false; con auto_discover=true manda lo que elijas en el gate de discovery.
+  # Halloween US (31-oct): ventana de compra abre 19-sep y cierra 28-oct → 83 días de runway
+  # desde hoy, de sobra para que una listing nueva acumule impresiones y rankee.
+  #
+  # Medido en EverBee (2026-08-05), volumen/competencia/score:
+  #   funny halloween pregnant announcement shirt    80 /   958 / 80  ← elegida
+  #   halloween pregnant announcement shirt         158 / 1.957 / 80
+  #   couples halloween pregnant announcement shirt  16 /   207 / 80  (volumen demasiado fino)
+  #   dog mom halloween shirt                       200 / 9.276 / 20
+  #   teacher halloween shirt                       658 / 40.640 / 20 (inalcanzable con 0 ventas)
+  # Elegida por ratio: la mitad de volumen que la #2 pero la mitad de competencia, y "funny"
+  # encaja con la marca. Descartada "dog mom halloween comfort colors shirt" (72/1.372/50):
+  # Comfort Colors es una marca de prenda concreta y aquí se imprime Bella+Canvas.
+  #
+  # Antes de cambiar esta keyword, medí la candidata en EverBee. El orden de palabras cambia
+  # el volumen en dos órdenes de magnitud y ni Gemini ni Apify lo detectan.
   keywords_seed:
-    - "Funny Dad Shirt"
+    - "funny halloween pregnant announcement shirt"
   max_niches: 1          # calidad > cantidad: 1 nicho × 5 diseños × 3 variaciones = 15 artworks únicos
   # Gates de calificación (ambos 0-10) — un nicho debe pasar LOS DOS para llegar a generación.
   min_demand_score: 7        # alta demanda (estimación Gemini)
@@ -111,10 +139,19 @@ publishing:
   # Verificado contra el profit calculator de Printify. Con tee Monster (~$13.50), free Standard
   # $4.75, off-site ads 12% y 0.16 → $29.99 (~14-23% neto según talla). Mercado POD dad-shirt: $20-30.
   free_shipping: true         # mete el envío en el precio (Etsy rankea mejor los listings con free shipping)
-  shipping_cost_usd: 4.75     # free Standard shipping (lo absorbe el precio). Economy ($4.29) si lo pones de default en store
+  shipping_cost_usd: 4.29     # free Economy shipping — es lo que está activo en la tienda (verificado 2026-08-05)
   etsy_offsite_ads: true      # publicidad off-site activada → su fee se mete en el precio
-  etsy_offsite_ads_rate: 0.12 # 12% si facturas <$10k/año (15% por encima, obligatorio)
-  target_net_margin: 0.16     # ~16% neto medio (14% en 2XL caro, 23% en S barato)
+  # OJO: la regla de Etsy va al revés de lo que decía este comentario antes.
+  # Facturando <$10k/año el fee es 15% y participar es OPCIONAL; a partir de $10k baja a
+  # 12% y pasa a ser OBLIGATORIO. Estamos en el tramo de 15% (confirmado en el panel de
+  # Printify). Se mantiene activo a propósito: con la tienda sin tráfico, off-site ads es
+  # el único canal que pone la listing fuera de Etsy, y sólo cobra si hay venta.
+  etsy_offsite_ads_rate: 0.15
+  # 0.14, no 0.16. Con envío gratis + 15% de ads, pedir 16% neto empuja el precio a $34.99,
+  # por encima del mercado POD ($20-30). Con 0.14 el precio se queda en $29.99 y el margen
+  # real es ~14.7% de media (Printify muestra $3.81 en la L cara, $6.47 en la S barata).
+  # Sube esto sólo cuando haya ventas que justifiquen probar un precio más alto.
+  target_net_margin: 0.14
   max_publish_per_run: 25
   # Cuántas variaciones del MISMO concepto llegan a Etsy. El generador crea 3 tratamientos
   # (base/dark/no-text) por idea; publicar los 3 crea listings casi idénticas que comparten
@@ -175,7 +212,7 @@ budget:
   cost_per_image_usd: 0.04
   cost_per_text_usd: 0.002
   cost_per_vision_usd: 0.01
-  cost_per_apify_call_usd: 0.05
+  cost_per_apify_call_usd: 0.05   # inerte mientras research.use_apify=false
 
 # Feedback loop post-publicación. Las ventas salen de Printify orders (única señal
 # de ventas real y programática — la API de Etsy no está disponible). `pnpm stats`

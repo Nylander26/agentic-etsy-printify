@@ -362,6 +362,38 @@ export async function getOrders(shopId: string, limit = 10): Promise<PrintifyOrd
 }
 
 /**
+ * Sets a product's listing tags with a dedicated PUT, and reports what actually stuck.
+ *
+ * `tags` passed in the CREATE payload is accepted and silently discarded — verified
+ * 2026-08-05 by diffing five freshly drafted products against the tags we sent: not one
+ * matched, every product came back with either nothing or hand-entered values. The whole
+ * catalog went to Etsy untagged because we sent the field once and never read it back.
+ *
+ * Returns the tags Printify reports afterwards, so the caller can see the difference
+ * instead of assuming. Never throws: a listing without tags is bad, a publish run that
+ * dies on tag-setting is worse.
+ */
+export async function setProductTags(
+  shopId: string,
+  productId: string,
+  tags: string[]
+): Promise<string[]> {
+  if (!tags.length) return [];
+  try {
+    await http.put(`/shops/${shopId}/products/${productId}.json`, { tags: tags.slice(0, 13) });
+  } catch (err) {
+    console.warn(`      ⚠ no se pudieron fijar los tags: ${err instanceof Error ? err.message : err}`);
+    return [];
+  }
+  try {
+    const after = (await getProduct(shopId, productId)) as unknown as { tags?: string[] };
+    return after.tags ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Enables Etsy's "Personalize" option on a product so buyers can submit custom text.
  * Printify stores this under `sales_channel_properties.personalisation` (British spelling).
  * Partial PUT — merges with any existing sales_channel_properties.

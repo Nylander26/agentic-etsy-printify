@@ -10,10 +10,14 @@ const BASE_COSTS: Record<ProductType, number> = {
 };
 
 // Etsy seller fees (US): 6.5% transaction + ~3% payment processing ≈ 9.5% of the order,
-// plus ~$0.45 fixed ($0.20 listing + ~$0.25 processing fixed). Off-site ads (12% under
-// $10k/yr, else 15%) are added on top when enabled — verified against Printify's own
-// profit calculator: at $24.99 with free Standard shipping + 12% off-site ads, total
-// deductions matched 21.5% + $0.45 + $4.75 shipping.
+// plus ~$0.45 fixed ($0.20 listing + ~$0.25 processing fixed). Off-site ads are added on
+// top when enabled: 15% while the shop bills under $10k/yr (optional at that tier), 12%
+// above it (mandatory) — note the rate goes DOWN as volume goes up.
+//
+// Verified against Printify's own dashboard 2026-08-05, size L: retail $29.99, production
+// $14.09, free Economy shipping $4.29, off-site ads 15% →
+//   29.99 − 14.09 − 4.29 − (0.245 × 29.99 + 0.45) = $3.81
+// which is the profit Printify itself reports for that row, to the cent.
 const ETSY_FEE_RATE = 0.095;
 const ETSY_FEE_FIXED = 0.45;
 
@@ -31,6 +35,10 @@ export interface PricingResult {
   suggestedPrice: number;
   margin: number;      // NET margin percentage (after garment + shipping + Etsy fees)
   marginUSD: number;   // NET profit per sale in USD
+  /** Set when the price could not honor the target — see `warning`. */
+  clamped?: boolean;
+  /** Human-readable reason the price is not what the config asked for. */
+  warning?: string;
 }
 
 /**
@@ -38,27 +46,32 @@ export interface PricingResult {
  * (when free_shipping), and Etsy's %+fixed fees:
  *   price = (garment + shipping + fixedFee) / (1 - etsyRate - targetNetMargin)
  * then rounded UP to a psychological price point. With Monster's tee (~$13.50), free
- * economy shipping ($4.29) and targetNetMargin 0.11 this lands at $22.99 (~11% net).
+ * Economy shipping ($4.29), 15% off-site ads and targetNetMargin 0.14 this lands at
+ * $29.99 (~14.7% net on the average size).
  */
 export function calculatePrice(
   product: ProductType,
   options: {
-    targetNetMargin?: number;  // 0..1, profit after costs+fees (default 0.16)
+    targetNetMargin?: number;  // 0..1, profit after costs+fees (default 0.14)
     freeShipping?: boolean;    // bake shipping into price (default true)
-    shippingCost?: number;     // absorbed shipping USD when freeShipping (default 4.75 Standard)
-    offsiteAdsRate?: number;   // extra Etsy off-site ads fee, e.g. 0.12 (default 0)
+    shippingCost?: number;     // absorbed shipping USD when freeShipping (default 4.29 Economy)
+    offsiteAdsRate?: number;   // extra Etsy off-site ads fee, e.g. 0.15 (default 0)
     nicheAvgPrice?: number;    // from research; only used as a soft sanity log upstream
     forcePrice?: number;       // override everything
+    /** Size-specific production cost. BASE_COSTS is a flat average across sizes; pass this
+     *  to reconcile against a single Printify row (S is cheaper, 2XL dearer). */
+    baseCostOverride?: number;
   } = {}
 ): PricingResult {
   const {
-    targetNetMargin = 0.16,
+    targetNetMargin = 0.14,
     freeShipping = true,
-    shippingCost = 4.75,
+    shippingCost = 4.29,
     offsiteAdsRate = 0,
     forcePrice,
+    baseCostOverride,
   } = options;
-  const baseCost = BASE_COSTS[product];
+  const baseCost = baseCostOverride ?? BASE_COSTS[product];
 
   // Off-site ads only charge on attributed sales, but pricing for them (worst case) means
   // organic sales just earn more — a safe, conservative price floor.
@@ -67,12 +80,12 @@ export function calculatePrice(
   const netOf = (price: number) => price - baseCost - shipping - (feeRate * price + ETSY_FEE_FIXED);
 
   if (forcePrice !== undefined) {
-    return {
+    return withSolvencyCheck({
       baseCost,
       suggestedPrice: forcePrice,
       margin: (netOf(forcePrice) / forcePrice) * 100,
       marginUSD: netOf(forcePrice),
-    };
+    });
   }
 
   // Solve for price that yields the target NET margin, then round up to a price point.
@@ -80,10 +93,39 @@ export function calculatePrice(
   const rawPrice = (baseCost + shipping + ETSY_FEE_FIXED) / Math.max(denom, 0.05);
   const suggestedPrice = nearestPricePoint(rawPrice);
 
-  return {
+  // `nearestPricePoint` falls back to the highest point when the solved price exceeds the
+  // ladder, and `Math.max(denom, 0.05)` caps an impossible target instead of failing. Both
+  // are silent: an over-ambitious `target_net_margin` used to come back as a normal-looking
+  // price that simply doesn't earn what was asked — or loses money — with nothing said.
+  const topPoint = PRICE_POINTS[PRICE_POINTS.length - 1] as number;
+  const clampedByLadder = rawPrice > topPoint;
+
+  return withSolvencyCheck({
     baseCost,
     suggestedPrice,
     margin: (netOf(suggestedPrice) / suggestedPrice) * 100,
     marginUSD: netOf(suggestedPrice),
-  };
+    ...(clampedByLadder
+      ? {
+          clamped: true,
+          warning:
+            `precio objetivo $${rawPrice.toFixed(2)} supera el tope de la escala ($${topPoint.toFixed(2)}); ` +
+            `se vende a $${suggestedPrice.toFixed(2)} y el margen real queda por debajo del objetivo`,
+        }
+      : {}),
+  });
+}
+
+/**
+ * Last line of defense: a price that does not cover cost + fees is never a rounding
+ * detail, it is a loss on every sale. Surfaced on the result (and logged once) rather
+ * than thrown, so a single bad product config can't abort a whole publish run.
+ */
+function withSolvencyCheck(r: PricingResult): PricingResult {
+  if (r.marginUSD > 0) return r;
+  const warning =
+    `precio $${r.suggestedPrice.toFixed(2)} NO cubre coste+fees ` +
+    `(margen ${r.marginUSD.toFixed(2)} USD / ${r.margin.toFixed(1)}%) — se vendería a pérdida`;
+  console.warn(`      ⚠️  Pricing: ${warning}`);
+  return { ...r, clamped: true, warning };
 }

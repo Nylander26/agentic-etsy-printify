@@ -18,6 +18,7 @@ import https from "node:https";
 import { env } from "../lib/env.js";
 import { getConfig } from "../lib/config.js";
 import { readApifyCache, writeApifyCache } from "../lib/apify-cache.js";
+import { apifyEnabled } from "../lib/apify.js";
 import { charge } from "../lib/budget.js";
 import type { MarketplaceSignals } from "./types.js";
 
@@ -91,6 +92,12 @@ function parsePrice(s: string | undefined): number | null {
 }
 
 export async function fetchMarketplaceSignals(keyword: string): Promise<MarketplaceSignals> {
+  // Kill switch (research.use_apify). Guarded here rather than at each call site so no
+  // path — pipeline, standalone research, test-apis — can reach the paid actor by
+  // accident. Everything below stays intact and starts working again the moment the
+  // flag flips back to true.
+  if (!apifyEnabled()) return EMPTY;
+
   if (!TOKEN) {
     console.warn(`  ⚠️  APIFY_TOKEN not set — skipping marketplace signals for "${keyword}"`);
     return EMPTY;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   preResearchGuard,
   hasMarketplaceSignal,
@@ -34,8 +34,23 @@ describe("preResearchGuard (product coherence)", () => {
 });
 
 describe("hasMarketplaceSignal", () => {
-  it("false when source is none and no listing count", () => {
-    expect(hasMarketplaceSignal({ source: "none", listingCount: null } as MarketplaceSignals)).toBe(false);
+  // The checkpoint is conditional now: with research.use_apify=false there is never a
+  // sample, so rejecting on its absence would empty every run. The original rule below
+  // still holds whenever the scraper is switched back on.
+  it("stands down while apify is off — absence of a scrape we skipped proves nothing", () => {
+    expect(hasMarketplaceSignal({ source: "none", listingCount: null } as MarketplaceSignals)).toBe(true);
+  });
+
+  it("rejects an empty sample once apify is switched back on", async () => {
+    vi.resetModules();
+    vi.doMock("../src/lib/apify.js", () => ({ apifyEnabled: () => true, APIFY_OFF_LABEL: "" }));
+    const { hasMarketplaceSignal: gated } = await import("../src/research/niche-filter.js");
+
+    expect(gated({ source: "none", listingCount: null } as MarketplaceSignals)).toBe(false);
+    expect(gated({ source: "apify", listingCount: null } as MarketplaceSignals)).toBe(true);
+
+    vi.doUnmock("../src/lib/apify.js");
+    vi.resetModules();
   });
 
   it("true when there is an apify sample", () => {

@@ -20,6 +20,7 @@ import https from "node:https";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { env } from "../lib/env.js";
+import { apifyEnabled } from "../lib/apify.js";
 import { charge } from "../lib/budget.js";
 import type { PinterestSignals } from "./types.js";
 
@@ -135,6 +136,9 @@ function median(nums: number[]): number | null {
 }
 
 export async function fetchPinterestSignals(keyword: string): Promise<PinterestSignals> {
+  // Same kill switch as the Etsy scraper — this actor is billed by Apify too.
+  if (!apifyEnabled()) return EMPTY_PINTEREST;
+
   if (!TOKEN) return EMPTY_PINTEREST;
 
   const cached = readPinterestCache(keyword);
