@@ -76,7 +76,11 @@ research:
   geo: "US"   # Google Trends region code — kept in sync with market.country
 
 generation:
-  designs_per_niche: 5
+  # 3, no 5. Bajado el 2026-08-05 tras publicar 5 listings apuntando todas a la misma
+  # keyword: compiten por la misma consulta y Etsy casi nunca muestra dos listings de la
+  # misma tienda en un resultado, así que una trabaja y el resto miran. Con 3 el mismo
+  # gasto cubre más keywords distintas — repartir a lo ancho, no a lo hondo.
+  designs_per_niche: 3
   products:
     - tshirt                  # 1 solo producto en esta fase — validar ventas antes de fan-out
   variations_per_design: 3   # base, dark, no-text — hardcoded in generator
