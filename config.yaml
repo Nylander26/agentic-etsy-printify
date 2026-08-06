@@ -47,26 +47,29 @@ research:
   # Lección de la tanda de Father's Day: publicada 2026-06-08 para el evento del 2026-06-21
   # (13 días) → nunca rankeó, 1 visita en 2 meses. 0 desactiva el gate.
   min_publish_lead_days: 30
-  # 1 sola seed = 1 llamada Apify = el nicho que se procesa. Solo se usa cuando
-  # auto_discover=false; con auto_discover=true manda lo que elijas en el gate de discovery.
-  # Halloween US (31-oct): ventana de compra abre 19-sep y cierra 28-oct → 83 días de runway
-  # desde hoy, de sobra para que una listing nueva acumule impresiones y rankee.
+  # 1 sola seed = el nicho que se procesa. Solo se usa cuando auto_discover=false;
+  # con auto_discover=true manda lo que elijas en el gate de discovery.
+  # Halloween US (31-oct): la ventana de compra abre el 19-sep y cierra el 28-oct. Todo lo
+  # que vaya a vender en Halloween tiene que estar publicado ANTES del 19-sep para acumular
+  # impresiones. Plan semana a semana + ranking completo: docs/keywords-halloween-2026.md.
   #
-  # Medido en EverBee (2026-08-05), volumen/competencia/score:
-  #   funny halloween pregnant announcement shirt    80 /   958 / 80  ← elegida
-  #   halloween pregnant announcement shirt         158 / 1.957 / 80
-  #   couples halloween pregnant announcement shirt  16 /   207 / 80  (volumen demasiado fino)
-  #   dog mom halloween shirt                       200 / 9.276 / 20
-  #   teacher halloween shirt                       658 / 40.640 / 20 (inalcanzable con 0 ventas)
-  # Elegida por ratio: la mitad de volumen que la #2 pero la mitad de competencia, y "funny"
-  # encaja con la marca. Descartada "dog mom halloween comfort colors shirt" (72/1.372/50):
-  # Comfort Colors es una marca de prenda concreta y aquí se imprime Bella+Canvas.
+  # TANDA 2 · 12-ago — medido en EverBee (2026-08-05), volumen/competencia/score:
+  #   halloween book lovers shirt                   363 /  1.772 / 210  ← elegida
+  #   halloween shirt for book lovers               161 /  1.771 /  90  (tanda 4, 26-ago)
+  #   halloween shirt nursing                       440 /  7.258 /  60  (tanda 3, 19-ago)
+  #   halloween book lover shirt (singular)         388 / 10.523 /  40  ← NO: misma frase,
+  #     sin la "s" son SEIS veces más competidores por el mismo volumen. Ver lección 2 del doc.
+  #   teacher halloween shirt                       658 / 40.640 /  20  (inalcanzable con 0 ventas)
+  # Es la mejor relación volumen/competencia de todo el pool medido: 363 búsquedas/mes contra
+  # 1.772 listings. Identidad de comprador: lector, terror literario, biblioteca.
   #
-  # Antes de cambiar esta keyword, medí la candidata en EverBee. El orden de palabras cambia
-  # el volumen en dos órdenes de magnitud y ni Gemini ni Apify lo detectan.
+  # Tanda 1 (5-ago, ya publicada): "funny halloween pregnant announcement shirt" 80/958/80.
+  #
+  # Antes de cambiar esta keyword, medí la candidata en EverBee. El orden de las palabras y el
+  # singular/plural cambian el volumen en dos órdenes de magnitud, y ni Gemini ni Apify lo ven.
   keywords_seed:
-    - "funny halloween pregnant announcement shirt"
-  max_niches: 1          # calidad > cantidad: 1 nicho × 5 diseños × 3 variaciones = 15 artworks únicos
+    - "halloween book lovers shirt"
+  max_niches: 1          # calidad > cantidad: 1 nicho × 3 diseños × 3 variaciones = 9 artworks únicos
   # Gates de calificación (ambos 0-10) — un nicho debe pasar LOS DOS para llegar a generación.
   min_demand_score: 7        # alta demanda (estimación Gemini)
   # Visibilidad social (Pinterest). Solo se aplica cuando HAY dato de Pinterest;
@@ -140,8 +143,9 @@ publishing:
   margin_percent: 50          # legacy — el pricing real usa target_net_margin (abajo)
   # Pricing por margen NETO: precio = (coste prenda + envío + fee fijo Etsy) / (1 - fee% total - target_net_margin)
   # fee% total = 9.5% Etsy (transacción+pago) + off-site ads (cuando etsy_offsite_ads=true).
-  # Verificado contra el profit calculator de Printify. Con tee Monster (~$13.50), free Standard
-  # $4.75, off-site ads 12% y 0.16 → $29.99 (~14-23% neto según talla). Mercado POD dad-shirt: $20-30.
+  # Verificado contra el profit calculator de Printify (2026-08-05): con tee Monster, free
+  # Economy $4.29, off-site ads 15% y target 0.14 → $29.99. Printify reporta $3.81 de profit
+  # en la talla L y $6.47 en la S. Mercado POD para una tee de nicho: $20-30.
   free_shipping: true         # mete el envío en el precio (Etsy rankea mejor los listings con free shipping)
   shipping_cost_usd: 4.29     # free Economy shipping — es lo que está activo en la tienda (verificado 2026-08-05)
   etsy_offsite_ads: true      # publicidad off-site activada → su fee se mete en el precio
