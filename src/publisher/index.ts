@@ -367,16 +367,13 @@ async function draftDesign(
   });
   console.log(`✓ (${product.id})`);
 
-  // Tags need their own PUT: the CREATE payload accepts the field and drops it, which
-  // is how the whole catalog reached Etsy with zero tags while our logs said otherwise.
-  // Read back what stuck rather than assuming — that assumption is the bug.
-  process.stdout.write("    Setting listing tags... ");
-  const storedTags = await setProductTags(shopId, product.id, seo.tags ?? []);
-  if (storedTags.length === 0 && (seo.tags?.length ?? 0) > 0) {
-    console.log(`⚠️  NO se guardaron (mandamos ${seo.tags?.length}) — la listing saldrá sin tags`);
-  } else {
-    console.log(`✓ ${storedTags.length}/13`);
-  }
+  // Tags are NOT set here. They need their own PUT (the CREATE payload accepts the field
+  // and drops it), but Printify's PUT is not a merge for `tags`: any later PUT that omits
+  // them wipes them. Setting tags at this point and then calling
+  // disableUnavailableVariants / setPersonalization / updateMockupSelection left the
+  // product with `tags: []` while the log above said "13/13" — verified 2026-08-06 by
+  // reading three freshly drafted products back after the run finished.
+  // The tag write therefore happens ONCE, in publishApproved's second pass, after mockups.
 
   // Stock reconcile (every product): Printify only exposes provider stock via the
   // product's variants. Disable any out-of-stock variant. If nothing sellable remains,
@@ -555,6 +552,28 @@ export async function publishApproved(): Promise<{ drafted: number; failed: numb
       }
     }
     console.log(`  → ${withMockups}/${packEntries.length} con mockups seleccionados`);
+  }
+
+  // ── Third pass: tags, LAST. ──────────────────────────────────────────────────
+  // This has to be the final write to each product. Printify's PUT replaces `tags`
+  // rather than merging, so the mockup selection above (PUT images) and the stock
+  // reconcile inside draftDesign (PUT variants) both blank them. Tagging at creation
+  // time reported "13/13" and still shipped `tags: []` to the store.
+  if (packEntries.length > 0) {
+    console.log("\n" + "─".repeat(60));
+    console.log(`\n🏷  Fijando tags (${packEntries.length} productos, última escritura)...`);
+    let tagged = 0;
+    for (const entry of packEntries) {
+      process.stdout.write(`  ${entry.printifyProductId} (${entry.product})... `);
+      const stored = await setProductTags(shop.id, entry.printifyProductId, entry.tags);
+      if (stored.length === 0 && entry.tags.length > 0) {
+        console.log(`⚠️  NO se guardaron (mandamos ${entry.tags.length}) — saldrá sin tags`);
+      } else {
+        tagged++;
+        console.log(`✓ ${stored.length}/13`);
+      }
+    }
+    console.log(`  → ${tagged}/${packEntries.length} con tags`);
   }
 
   console.log("\n" + "─".repeat(60));
