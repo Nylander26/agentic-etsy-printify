@@ -7,6 +7,7 @@ import { mkdirSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { generateNicheDesigns } from "./run.js";
 import { budgetReport } from "../lib/budget.js";
+import { getConfig } from "../lib/config.js";
 import type { ProductType, DesignMetadata, NicheContext } from "./types.js";
 import type { ResearchResult, NicheAnalysis, DesignIdea } from "../research/types.js";
 
@@ -42,8 +43,14 @@ function parseArgs(): {
 
   const fromResearch = args.includes("--from-research");
 
+  // Default comes from config, NOT a literal. `pnpm pipeline` passes
+  // generation.designs_per_niche explicitly, so before this the standalone CLI was the
+  // only path that ignored it: on 2026-08-14 `pnpm generate --from-research` burned 15
+  // images for a niche configured at 3 designs, because research had returned 5 ideas
+  // and the hardcoded 5 let all of them through. Both entry points read the same knob now.
   const maxIdx = args.indexOf("--max");
-  const maxDesigns = maxIdx !== -1 ? Number(args[maxIdx + 1] ?? 5) : 5;
+  const maxDesigns =
+    maxIdx !== -1 ? Number(args[maxIdx + 1]) : getConfig().generation.designs_per_niche;
 
   return { niche, products, fromResearch, maxDesigns };
 }
