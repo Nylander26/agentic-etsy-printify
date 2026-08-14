@@ -61,8 +61,8 @@ las busca gente que quiere body o camiseta de bebé. El catálogo sólo tiene Be
 | Semana | Keyword | Identidad de comprador | Estado |
 |---|---|---|---|
 | 1 · 5-ago | `funny halloween pregnant announcement shirt` | anuncia embarazo en Halloween | ✅ 5 listings publicadas |
-| 2 · 12-ago | `halloween book lovers shirt` | lector, terror literario, biblioteca | 🟡 3 drafts en Printify (6-ago), publicar a Etsy el 12 |
-| 3 · 19-ago | `halloween shirt nursing` | enfermería en turno de Halloween | pendiente |
+| 2 · 12-ago | `halloween book lovers shirt` | lector, terror literario, biblioteca | ✅ 3 listings publicadas |
+| 3 · 19-ago | `halloween shirt nursing` | enfermería en turno de Halloween | 🟡 3 drafts en Printify (14-ago), publicar a Etsy el 19 |
 | 4 · 26-ago | `halloween shirt for book lovers` | mismo nicho, segunda consulta | pendiente |
 | 5 · 2-sep | `halloween cat mom shirt` | dueña de gato | pendiente |
 | 6 · 9-sep | reforzar la que mejor vaya | — | decidir con datos |
