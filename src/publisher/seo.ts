@@ -50,6 +50,59 @@ export function sanitizeTag(raw: string): string {
   return kept.length ? kept.join(" ") : clean.slice(0, MAX_TAG_CHARS).trim();
 }
 
+/**
+ * Printify refuses to create a product whose title "contains excessive caps" (HTTP 400,
+ * code 61003) and the whole draft is lost. What trips it is not shouting: it is the
+ * acronym pile-up Gemini produces in jargon-heavy niches. The nursing batch of
+ * 2026-08-14 came back as
+ *   "Halloween Nurse Shirt Spooky Skeleton Hand EKG Tee Vintage Distressed RN Gift
+ *    ER ICU L&D Nursing Apparel Medical Staff Top"
+ * — five ALL-CAPS tokens and 20 of 20 words capitalized. The two titles in the same run
+ * carrying a single acronym ("RN") were accepted, so the trigger is the pile, not any one
+ * token.
+ *
+ * Keeps the FIRST acronym (the leading one is the load-bearing search term — nurses do
+ * search "RN shirt") and drops the rest, then lowercases the connector words. Dropping a
+ * token is safe here because these titles are keyword lists, not sentences.
+ */
+const TITLE_MINOR_WORDS = new Set([
+  "and", "for", "with", "the", "of", "to", "in", "a", "an", "or", "on",
+]);
+export const MAX_TITLE_ACRONYMS = 1;
+
+export function sanitizeTitle(raw: string): string {
+  const out: string[] = [];
+  let acronyms = 0;
+
+  for (const tok of raw.trim().split(/\s+/)) {
+    const letters = tok.replace(/[^A-Za-z]/g, "");
+    if (letters.length >= 2 && letters === letters.toUpperCase()) {
+      if (acronyms >= MAX_TITLE_ACRONYMS) {
+        // Keep whatever separator the dropped token carried, so "Tee, ICU, Gift" collapses
+        // to "Tee, Gift" instead of "Tee, Gift" losing its comma structure entirely.
+        const sep = tok.replace(/[A-Za-z0-9&]/g, "").trim();
+        if (sep) out.push(sep);
+        continue;
+      }
+      acronyms++;
+      out.push(tok);
+      continue;
+    }
+    const bare = tok.replace(/[^A-Za-z]/g, "").toLowerCase();
+    out.push(out.length > 0 && TITLE_MINOR_WORDS.has(bare) ? tok.toLowerCase() : tok);
+  }
+
+  const collapsed = out
+    .join(" ")
+    .replace(/([,|·])(?:\s*[,|·])+/g, "$1")    // separators left adjacent by a drop
+    .replace(/^\s*[,|·-]\s*/, "")
+    .replace(/\s*[,|·-]\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return trimToWord(collapsed, MAX_TITLE_CHARS);
+}
+
 /** Cut to `max` chars on a word boundary — a hard slice leaves half-words in the title. */
 export function trimToWord(s: string, max: number): string {
   const clean = s.trim();
@@ -98,7 +151,7 @@ ${(meta.prompt ?? "").slice(0, 1200)}
 Write Etsy listing copy that maximizes search visibility and conversion.
 
 Rules:
-- Title: max 140 chars, start with the most important keyword, natural language
+- Title: max 140 chars, start with the most important keyword, natural language. At most ONE all-caps acronym in the whole title (Printify rejects a title with several as "excessive caps"); spell the rest out — "emergency room", not "ER".
 - Description: minimum 2000 chars, weave keywords naturally, include product details, gift ideas, care instructions. Use line breaks for readability. No markdown headers.
 - Tags: exactly 13 tags, each max 20 chars, use long-tail keywords, no duplicates. Letters, numbers, spaces, hyphens and apostrophes ONLY — Etsy rejects a tag containing a comma or any other punctuation. Derive tags from the actual subject matter in the design brief, the niche/research keywords, AND the high-frequency competitor keywords above — but only include a competitor term when it genuinely matches this design (no keyword stuffing of irrelevant terms).
 - taxonomyId: use ${TAXONOMY_IDS[meta.product]}
@@ -180,7 +233,7 @@ export function buildTags(
 function fallbackSEO(meta: DesignMetadata, price: number, competitorKeywords: string[] = []): EtsySEO {
   const productName = meta.product === "tshirt" ? "T-Shirt" : meta.product === "mug" ? "Mug" : "Poster";
   const niche = meta.niche.replace(/\b\w/g, (c) => c.toUpperCase());
-  const title = trimToWord(`${niche} ${productName} - ${meta.concept}`, MAX_TITLE_CHARS);
+  const title = sanitizeTitle(`${niche} ${productName} - ${meta.concept}`);
 
   const seedTags = [
     niche,
@@ -263,7 +316,7 @@ export async function generateSEO(
   );
 
   return {
-    title: trimToWord(raw.title, MAX_TITLE_CHARS),
+    title: sanitizeTitle(raw.title),
     description: raw.description,
     tags,
     taxonomyId: TAXONOMY_IDS[meta.product],

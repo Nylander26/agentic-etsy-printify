@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeTag, trimToWord, buildTags, MAX_TAG_CHARS, TAG_COUNT } from "../src/publisher/seo.js";
+import {
+  sanitizeTag,
+  sanitizeTitle,
+  trimToWord,
+  buildTags,
+  MAX_TAG_CHARS,
+  MAX_TITLE_CHARS,
+  TAG_COUNT,
+} from "../src/publisher/seo.js";
 
 const meta = { niche: "funny halloween shirt", product: "tshirt" as const };
 
@@ -46,6 +54,46 @@ describe("sanitizeTag", () => {
   it("never leaves trailing space after the length cap", () => {
     const t = sanitizeTag("halloween pregnancy announcement");
     expect(t).toBe(t.trim());
+  });
+});
+
+describe("sanitizeTitle", () => {
+  // The real title Printify rejected with 61003 "Title contains excessive caps".
+  const rejected =
+    "Halloween Nurse Shirt Spooky Skeleton Hand EKG Tee Vintage Distressed RN Gift " +
+    "ER ICU L&D Nursing Apparel Medical Staff Top";
+
+  it("keeps only the first acronym of a pile-up", () => {
+    const out = sanitizeTitle(rejected);
+    expect(out).toContain("EKG");
+    expect(out).not.toContain("RN");
+    expect(out).not.toContain("ICU");
+    expect(out).not.toContain("L&D");
+  });
+
+  it("leaves a title with a single acronym untouched", () => {
+    const ok = "Night Shift Undead Nurse Halloween Shirt | Funny Zombie RN Tee";
+    expect(sanitizeTitle(ok)).toBe(ok);
+  });
+
+  it("lowercases connector words but never the first one", () => {
+    expect(sanitizeTitle("The Nurse Shirt For Halloween And Fall")).toBe(
+      "The Nurse Shirt for Halloween and Fall"
+    );
+  });
+
+  it("does not leave doubled separators where a token was dropped", () => {
+    // ER survives as the first acronym; ICU goes, and must not leave "| |" behind.
+    expect(sanitizeTitle("Nurse Tee | ER | ICU | Gift")).toBe("Nurse Tee | ER | Gift");
+    expect(sanitizeTitle("Nurse Tee, ER, ICU, Gift")).toBe("Nurse Tee, ER, Gift");
+  });
+
+  it("does not strip a hyphen inside a word", () => {
+    expect(sanitizeTitle("Cat-Mom Halloween Tee")).toBe("Cat-Mom Halloween Tee");
+  });
+
+  it("still enforces the Etsy title limit", () => {
+    expect(sanitizeTitle("Nurse ".repeat(50)).length).toBeLessThanOrEqual(MAX_TITLE_CHARS);
   });
 });
 
